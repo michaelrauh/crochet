@@ -1,0 +1,42 @@
+name: Provision and Deploy Crochet
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+      - 'src/**'
+
+jobs:
+  provision_and_deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      # AWS Credentials for DigitalOcean Spaces
+      AWS_ACCESS_KEY_ID: ${{ secrets.DO_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SECRET_KEY }}
+
+      # Terraform Variables
+      TF_VAR_digitalocean_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+      TF_VAR_do_access_key: ${{ secrets.DO_ACCESS_KEY }}
+      TF_VAR_do_secret_key: ${{ secrets.DO_SECRET_KEY }}
+      TF_VAR_postgres_user: ${{ secrets.POSTGRES_USER }}
+      TF_VAR_postgres_password: ${{ secrets.POSTGRES_PASSWORD }}
+      TF_VAR_rabbitmq_password: ${{ secrets.RABBITMQ_PASSWORD }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set Up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.10.5
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve

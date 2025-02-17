@@ -1,16 +1,34 @@
 ```mermaid
 sequenceDiagram
-    participant ProcessWork
-    participant WorkServer
+    participant Worker
+    participant Queue
     participant Ortho
-    participant ContextKeeper
+    participant Database
 
-    ProcessWork->>WorkServer: pop()
-    WorkServer-->>ProcessWork: status_top_and_version
-    ProcessWork->>Ortho: get_requirements(top)
-    Ortho-->>ProcessWork: {forbidden, required}
-    ProcessWork->>ContextKeeper: add_orthos(new_orthos)
-    ProcessWork->>ContextKeeper: add_remediations(remediations)
-    ProcessWork->>WorkServer: push(new_orthos)
-    ProcessWork->>WorkServer: Process.send_after(WorkerServer, :retry_process, 5_000)
+    alt on startup only
+        Worker->>Database: check_version()
+        Database-->>Worker: new_version
+        Worker->>Database: update_context()
+        Database-->>Worker: (vocabulary, lines)
+    end
+
+    Worker->>Queue: pop()
+    Queue-->>Worker: work_item
+    Worker->>Ortho: get_requirements(work_item)
+    Ortho-->>Worker: (forbidden, required)
+    Worker ->> Worker: (orthos, remediations)
+    Worker->>Database: add_orthos(orthos)
+    Database-->>Worker: new_orthos
+    Worker->>Database: add_remediations(remediations)
+    Worker->>Queue: push(new_orthos)
+    Worker->>Database: check_version()
+    Database-->>Worker: new_version
+
+    alt new_version is different
+        Worker->>Database: update_context()
+        Database-->>Worker: (vocabulary, lines)
+        Worker->>Queue: nack()
+    else new_version is the same
+        Worker->>Queue: ack()
+    end
 ```

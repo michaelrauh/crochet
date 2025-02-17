@@ -40,3 +40,5 @@ jobs:
 
       - name: Terraform Apply
         run: terraform apply -auto-approve
+
+      # todo update the droplet with the latest rust code. Check to make sure it provisions and also can just update

@@ -1,2 +1,4 @@
 /target
 .secrets
+deploy.sh
+teardown.sh

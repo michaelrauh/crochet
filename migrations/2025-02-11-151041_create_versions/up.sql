@@ -1,0 +1,4 @@
+CREATE TABLE versions (
+  id SERIAL PRIMARY KEY,
+  version BIGINT NOT NULL UNIQUE
+)

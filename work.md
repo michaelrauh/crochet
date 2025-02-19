@@ -2,7 +2,6 @@
 sequenceDiagram
     participant Worker
     participant Queue
-    participant Ortho
     participant Database
 
     alt on startup only
@@ -14,9 +13,6 @@ sequenceDiagram
 
     Worker->>Queue: pop()
     Queue-->>Worker: work_item
-    Worker->>Ortho: get_requirements(work_item)
-    Ortho-->>Worker: (forbidden, required)
-    Worker ->> Worker: (orthos, remediations)
     Worker->>Database: add_orthos(orthos)
     Database-->>Worker: new_orthos
     Worker->>Database: add_remediations(remediations)

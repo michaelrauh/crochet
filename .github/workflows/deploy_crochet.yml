@@ -14,26 +14,34 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # AWS Credentials for DigitalOcean Spaces
       AWS_ACCESS_KEY_ID: ${{ secrets.DO_ACCESS_KEY }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SECRET_KEY }}
-
-      # Terraform Variables
       TF_VAR_digitalocean_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
       TF_VAR_do_access_key: ${{ secrets.DO_ACCESS_KEY }}
       TF_VAR_do_secret_key: ${{ secrets.DO_SECRET_KEY }}
       TF_VAR_postgres_user: ${{ secrets.POSTGRES_USER }}
       TF_VAR_postgres_password: ${{ secrets.POSTGRES_PASSWORD }}
       TF_VAR_rabbitmq_password: ${{ secrets.RABBITMQ_PASSWORD }}
+      TF_VAR_ssh_fingerprint: ${{ secrets.SSH_FINGERPRINT }}
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      - name: Set Up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Build Rust Project
+        run: cargo build --release
+
       - name: Set Up Terraform
-        uses: hashicorp/setup-terraform@v2
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.10.5
+          terraform_wrapper: false
 
       - name: Terraform Init
         run: terraform init
@@ -41,4 +49,43 @@ jobs:
       - name: Terraform Apply
         run: terraform apply -auto-approve
 
-      # todo update the droplet with the latest rust code. Check to make sure it provisions and also can just update
+      - name: Retrieve Droplet IP
+        id: droplet_ip
+        run: |
+          DROPLET_IP=$(terraform output -raw droplet_ip)
+          echo "DROPLET_IP=$DROPLET_IP" >> $GITHUB_ENV
+
+      - name: Retrieve Database URL
+        id: database_url
+        run: |
+          set +x
+          DATABASE_URL=$(terraform output -raw database_url)
+          echo "::add-mask::$DATABASE_URL"
+          echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
+
+      - name: Retrieve RabbitMQ Connection String
+        id: rabbitmq_connection
+        run: |
+          set +x
+          RABBITMQ_CONNECTION=$(terraform output -raw rabbitmq_connection_string)
+          echo "::add-mask::$RABBITMQ_CONNECTION"
+          echo "RABBITMQ_CONNECTION=$RABBITMQ_CONNECTION" >> $GITHUB_ENV
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.5.3
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Install Dependencies on Droplet
+        run: |
+          ssh -o StrictHostKeyChecking=no root@$DROPLET_IP "apt-get update && apt-get install -y libpq5"
+
+      - name: Start Application
+        run: | 
+          scp -o StrictHostKeyChecking=no target/release/crochet root@$DROPLET_IP:/usr/local/bin/crochet
+          ssh -o StrictHostKeyChecking=no root@$DROPLET_IP "\
+            pkill -9 crochet || true; \
+            export DATABASE_URL=\"$DATABASE_URL\"; \
+            export RABBITMQ_URL=\"$RABBITMQ_CONNECTION\"; \
+            nohup /usr/local/bin/crochet > /var/log/crochet.log 2>&1 &"
+          echo \"DROPLET_IP=$DROPLET_IP\"

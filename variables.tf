@@ -8,11 +8,6 @@ variable "postgres_password" {
   type        = string
 }
 
-variable "rabbitmq_password" {
-  description = "RabbitMQ password for Crochet"
-  type        = string
-}
-
 variable "digitalocean_token" {
   description = "DigitalOcean API token"
   type        = string

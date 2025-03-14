@@ -11,9 +11,21 @@ provider "digitalocean" {
   token = var.digitalocean_token
 }
 
+provider "kubernetes" {
+  host                   = digitalocean_kubernetes_cluster.crochet_doks.kube_config[0].host
+  cluster_ca_certificate = base64decode(digitalocean_kubernetes_cluster.crochet_doks.kube_config[0].cluster_ca_certificate)
+  token                  = digitalocean_kubernetes_cluster.crochet_doks.kube_config[0].token
+}
+
 variable "rabbitmq_password" {
   type        = string
   description = "The password for RabbitMQ"
+  sensitive   = true
+}
+
+variable "digitalocean_registry_token" {
+  type        = string
+  description = "The token for the DigitalOcean Container Registry"
   sensitive   = true
 }
 
@@ -24,7 +36,6 @@ resource "digitalocean_droplet" "crochet_rabbitmq" {
   region   = "nyc1"
   size     = "s-1vcpu-1gb"
   tags     = ["rabbitmq"]
-  ssh_keys = [var.ssh_fingerprint]
 
   user_data = <<EOF
 #!/bin/bash
@@ -59,21 +70,47 @@ output "rabbitmq_connection_string" {
   sensitive = true
 }
 
-variable "ssh_fingerprint" {
-  description = "The fingerprint of the SSH key to use for the droplet"
-  type        = string
+resource "digitalocean_kubernetes_cluster" "crochet_doks" {
+  name    = "crochet-doks-cluster"
+  region  = "nyc1"
+  version = "1.32.2-do.0" 
+
+  node_pool {
+    name       = "default-pool"
+    size       = "s-1vcpu-2gb"
+    node_count = 1
+  }
 }
 
-resource "digitalocean_droplet" "crochet_app" {
-  count  = 1
-  name   = "crochet-app-${count.index}"
-  image  = "ubuntu-22-04-x64"
-  region = "nyc1"
-  size   = "s-1vcpu-1gb"
-  tags   = ["app"]
-  ssh_keys = [var.ssh_fingerprint]
+resource "digitalocean_container_registry" "crochet_registry" {
+  name = "crochet-registry"
+  subscription_tier_slug = "basic"
 }
 
-output "droplet_ip" {
-  value = digitalocean_droplet.crochet_app[0].ipv4_address
+resource "kubernetes_secret" "regcred" {
+  metadata {
+    name = "regcred"
+  }
+  type = "kubernetes.io/dockerconfigjson"
+  data = {
+    ".dockerconfigjson" = base64encode(jsonencode({
+      auths = {
+        "registry.digitalocean.com" = {
+          username = "do"
+          password = var.digitalocean_registry_token
+          email    = "unused@example.com"
+          auth     = base64encode("do:${var.digitalocean_registry_token}")
+        }
+      }
+    }))
+  }
+}
+
+output "kubeconfig" {
+  value     = digitalocean_kubernetes_cluster.crochet_doks.kube_config[0].raw_config
+  sensitive = true
+}
+
+output "registry_endpoint" {
+  value = digitalocean_container_registry.crochet_registry.endpoint
 }

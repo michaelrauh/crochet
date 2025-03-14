@@ -16,7 +16,6 @@ func main() {
 	fmt.Printf("DATABASE_URL: %s\n", databaseURL)
 	fmt.Printf("RABBITMQ_URL: %s\n", rabbitmqURL)
 
-	// Connect to the database
 	connStr, err := pq.ParseURL(databaseURL)
 	if err != nil {
 		panic(fmt.Sprintf("Error parsing database URL: %s", err))
@@ -28,13 +27,10 @@ func main() {
 	defer db.Close()
 	fmt.Println("Connected to database")
 
-	// Connect to RabbitMQ
 	conn, err := amqp.Dial(rabbitmqURL)
 	if err != nil {
 		panic(fmt.Sprintf("Error connecting to RabbitMQ: %s", err))
 	}
 	defer conn.Close()
 	fmt.Println("Connected to queue")
-
-	// ...existing code...
 }

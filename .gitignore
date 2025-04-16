@@ -2,3 +2,4 @@
 .secrets
 deploy.sh
 teardown.sh
+infra/terraform/terraform.tfvars

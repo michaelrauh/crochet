@@ -1,4 +1,4 @@
-FROM golang:1.20-slim AS builder
+FROM golang:1.22-slim AS builder
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ COPY main.go ./
 
 RUN CGO_ENABLED=0 GOOS=linux go build -v -o server .
 
-FROM alpine:3.18
+FROM alpine:latest
 
 WORKDIR /app
 COPY --from=builder /app/server ./server

@@ -1,27 +1,45 @@
-#!/usr/bin/env bash
-set -e
 
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[0;33m'
-NC='\033[0m'
+set -e
 
 docker-compose up -d --build
 
-# Test round trip with valid JSON
-echo -e "${YELLOW}Test 1: Testing round trip with valid JSON...${NC}"
-response=$(curl -s -X POST http://localhost:8080/ingest \
+response1=$(curl -s -X POST http://localhost:8080/ingest \
     -H "Content-Type: application/json" \
     -d '{"title": "Test Title", "text": "This is a test message"}')
 
-if echo "$response" | grep -q "success"; then
-    echo -e "${GREEN}Test passed! Received success response: $response${NC}"
-else
-    echo -e "${RED}Test failed! Unexpected response: $response${NC}"
-    echo -e "${YELLOW}Fetching logs for debugging...${NC}"
+if ! echo "$response1" | grep -q '"status":"success"'; then
+    echo "failed"
     docker-compose logs
     docker-compose down --remove-orphans
     exit 1
 fi
 
+if ! echo "$response1" | grep -q '"version":1'; then
+    echo "failed: version mismatch in first call"
+    docker-compose logs
+    docker-compose down --remove-orphans
+    exit 1
+fi
+
+response2=$(curl -s -X POST http://localhost:8080/ingest \
+    -H "Content-Type: application/json" \
+    -d '{"title": "Test Title", "text": "This is a test message. Hello world"}')
+
+if ! echo "$response2" | grep -q '"status":"success"'; then
+    echo "failed"
+    docker-compose logs
+    docker-compose down --remove-orphans
+    exit 1
+fi
+
+if ! echo "$response2" | grep -q '"version":2'; then
+    echo "failed: version mismatch in second call"
+    docker-compose logs
+    docker-compose down --remove-orphans
+    exit 1
+fi
+
+docker-compose logs
+
 docker-compose down --remove-orphans
+echo "success"

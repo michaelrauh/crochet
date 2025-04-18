@@ -18,32 +18,35 @@ type Corpus struct {
 }
 
 type ContextService interface {
-	SendMessage(message string) error
+	SendMessage(message string) (map[string]interface{}, error)
 }
 
 type RealContextService struct {
 	URL string
 }
 
-func (s *RealContextService) SendMessage(message string) error {
-	contextInput := map[string]string{"message": message}
-	contextInputJSON, err := json.Marshal(contextInput)
+func (s *RealContextService) SendMessage(message string) (map[string]interface{}, error) {
+	resp, err := http.Post(s.URL+"/input", "application/json", bytes.NewBuffer([]byte(message)))
 	if err != nil {
-		return fmt.Errorf("error preparing data for context service: %w", err)
-	}
-
-	resp, err := http.Post(s.URL, "application/json", bytes.NewBuffer(contextInputJSON))
-	if err != nil {
-		return fmt.Errorf("error calling context service: %w", err)
+		return nil, fmt.Errorf("error calling context service: %w", err)
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("Response from context service: %s", string(body))
+
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("context service error: %s, Status Code: %d", string(body), resp.StatusCode)
+		return nil, fmt.Errorf("context service error: %s, Status Code: %d", string(body), resp.StatusCode)
 	}
 
-	return nil
+	var response map[string]interface{}
+	if err := json.Unmarshal(body, &response); err != nil {
+		log.Printf("Error parsing context service response: %v", err)
+		return nil, fmt.Errorf("invalid response from context service")
+	}
+
+	log.Printf("Parsed response: %v", response)
+	return response, nil
 }
 
 func handleTextInput(w http.ResponseWriter, r *http.Request, contextService ContextService) {
@@ -67,17 +70,37 @@ func handleTextInput(w http.ResponseWriter, r *http.Request, contextService Cont
 
 	fmt.Printf("Title: %s\nText: %s\n", corpus.Title, corpus.Text)
 
-	subphrases := text.GenerateSubphrases(corpus.Text)
-	vocabulary := text.Vocabulary(corpus.Text)
+	// Process the text using methods from crochet/text
+	subphrases := text.GenerateSubphrases(corpus.Text) // Generate subphrases
+	vocabulary := text.Vocabulary(corpus.Text)         // Generate vocabulary
 
-	message := fmt.Sprintf("Title: %s, Subphrases: %v, Vocabulary: %v", corpus.Title, subphrases, vocabulary)
-	if err := contextService.SendMessage(message); err != nil {
+	// Prepare the data to send to the context service
+	contextInput := map[string]interface{}{
+		"title":      corpus.Title,
+		"vocabulary": vocabulary,
+		"subphrases": subphrases,
+	}
+
+	contextInputJSON, err := json.Marshal(contextInput)
+	if err != nil {
+		log.Printf("Error preparing data for context service: %v", err)
+		http.Error(w, "Error preparing data for context service", http.StatusInternalServerError)
+		return
+	}
+
+	// Forward the processed data to the context service
+	contextResponse, err := contextService.SendMessage(string(contextInputJSON))
+	if err != nil {
 		log.Printf("Error sending message to context service: %v", err)
 		http.Error(w, "Error calling context service", http.StatusInternalServerError)
 		return
 	}
 
-	response := map[string]string{"status": "success"}
+	// Respond to the client with the version from the context service
+	response := map[string]interface{}{
+		"status":  "success",
+		"version": contextResponse["version"],
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)

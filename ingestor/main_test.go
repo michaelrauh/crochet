@@ -10,17 +10,17 @@ import (
 )
 
 type MockContextService struct {
-	SendMessageFunc func(message string) error
+	SendMessageFunc func(message string) (map[string]interface{}, error)
 }
 
-func (m *MockContextService) SendMessage(message string) error {
+func (m *MockContextService) SendMessage(message string) (map[string]interface{}, error) {
 	return m.SendMessageFunc(message)
 }
 
 func TestHandleTextInputValidJSON(t *testing.T) {
 	mockService := &MockContextService{
-		SendMessageFunc: func(message string) error {
-			return nil
+		SendMessageFunc: func(message string) (map[string]interface{}, error) {
+			return map[string]interface{}{"version": 1}, nil
 		},
 	}
 
@@ -48,8 +48,8 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 
 func TestHandleTextInputInvalidJSON(t *testing.T) {
 	mockService := &MockContextService{
-		SendMessageFunc: func(message string) error {
-			return nil
+		SendMessageFunc: func(message string) (map[string]interface{}, error) {
+			return nil, nil
 		},
 	}
 
@@ -71,8 +71,8 @@ func TestHandleTextInputInvalidJSON(t *testing.T) {
 
 func TestHandleTextInputEmptyBody(t *testing.T) {
 	mockService := &MockContextService{
-		SendMessageFunc: func(message string) error {
-			return nil
+		SendMessageFunc: func(message string) (map[string]interface{}, error) {
+			return nil, nil
 		},
 	}
 
@@ -93,8 +93,8 @@ func TestHandleTextInputEmptyBody(t *testing.T) {
 
 func TestHandleTextInputWrongMethod(t *testing.T) {
 	mockService := &MockContextService{
-		SendMessageFunc: func(message string) error {
-			return nil
+		SendMessageFunc: func(message string) (map[string]interface{}, error) {
+			return nil, nil
 		},
 	}
 

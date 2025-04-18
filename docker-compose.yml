@@ -4,33 +4,42 @@ services:
       context: .
       dockerfile: ./ingestor/Dockerfile
     ports:
-      - "${INGESTOR_PORT:-8080}:8080"
+      - "8080:8080"
     depends_on:
-      context:
-        condition: service_healthy
+      - context
     networks:
       - app-network
     environment:
-      - CONTEXT_SERVICE_URL=http://context:${CONTEXT_PORT:-8081}/input
+      - CONTEXT_SERVICE_URL=http://context:8081  # Correctly point to the context service
       - INGESTOR_PORT=8080
-  
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   context:
     build:
       context: .
       dockerfile: ./context/Dockerfile
     ports:
-      - "${CONTEXT_PORT:-8081}:8081"
+      - "8081:8081"
     networks:
       - app-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:${CONTEXT_PORT:-8081}/health || (echo 'Health check failed' && exit 1)"]
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/health | grep -q 200 || (echo 'Health check failed' && exit 1)"]
       interval: 5s
       timeout: 3s
       retries: 5
-      start_period: 10s
+      start_period: 30s
     environment:
       - CONTEXT_PORT=8081
-      - CONTEXT_HOST=0.0.0.0 # Use Docker Compose namespace-compatible host
+      - CONTEXT_HOST=0.0.0.0
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   app-network:

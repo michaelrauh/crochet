@@ -30,7 +30,7 @@ services:
       start_period: 10s
     environment:
       - CONTEXT_PORT=8081
-      - "HOST=0.0.0.0" # Ensure the service binds to all interfaces
+      - CONTEXT_HOST=0.0.0.0 # Use Docker Compose namespace-compatible host
 
 networks:
   app-network:

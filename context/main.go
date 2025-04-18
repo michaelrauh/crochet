@@ -14,7 +14,7 @@ type Input struct {
 }
 
 func handleInput(w http.ResponseWriter, r *http.Request) {
-	// Log the incoming request for debugging
+
 	log.Printf("Received request: %v", r)
 
 	if r.Method != http.MethodPost {
@@ -48,17 +48,20 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	log.Println("Starting context service...") // Debug log
+	log.Println("Starting context service...")
 
-	// Read the port from an environment variable
 	port := os.Getenv("CONTEXT_PORT")
 	if port == "" {
 		panic("CONTEXT_PORT environment variable is not set")
 	}
 
-	host := "0.0.0.0" // Ensure the service binds to all interfaces
+	host := os.Getenv("CONTEXT_HOST")
+	if host == "" {
+		panic("CONTEXT_HOST environment variable is not set")
+	}
+
 	http.HandleFunc("/input", handleInput)
-	http.HandleFunc("/health", handleHealth) // Add health check endpoint
+	http.HandleFunc("/health", handleHealth)
 
 	log.Printf("Context service starting on %s:%s...\n", host, port)
 	if err := http.ListenAndServe(host+":"+port, nil); err != nil {

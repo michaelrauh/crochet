@@ -12,6 +12,7 @@ services:
     environment:
       - CONTEXT_SERVICE_URL=http://context:8081  # Correctly point to the context service
       - INGESTOR_PORT=8080
+      - REMEDIATIONS_SERVICE_URL=http://remediations:8082  # Add URL for remediations service
     logging:
       driver: "json-file"
       options:
@@ -35,6 +36,22 @@ services:
     environment:
       - CONTEXT_PORT=8081
       - CONTEXT_HOST=0.0.0.0
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  remediations:
+    build:
+      context: .
+      dockerfile: ./remediations/Dockerfile
+    ports:
+      - "8082:8082"
+    networks:
+      - app-network
+    environment:
+      - REMEDIATIONS_PORT=8082
     logging:
       driver: "json-file"
       options:

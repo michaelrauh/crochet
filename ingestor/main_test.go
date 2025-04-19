@@ -17,10 +17,32 @@ func (m *MockContextService) SendMessage(message string) (map[string]interface{}
 	return m.SendMessageFunc(message)
 }
 
+type MockRemediationsService struct {
+	FetchRemediationsFunc func(subphrases [][]string) (map[string]interface{}, error)
+}
+
+func (m *MockRemediationsService) FetchRemediations(subphrases [][]string) (map[string]interface{}, error) {
+	return m.FetchRemediationsFunc(subphrases)
+}
+
 func TestHandleTextInputValidJSON(t *testing.T) {
-	mockService := &MockContextService{
+	mockContextService := &MockContextService{
 		SendMessageFunc: func(message string) (map[string]interface{}, error) {
-			return map[string]interface{}{"version": 1}, nil
+			return map[string]interface{}{
+				"version": 1,
+				"newSubphrases": []interface{}{
+					[]interface{}{"test", "content"},
+				},
+			}, nil
+		},
+	}
+
+	mockRemediationsService := &MockRemediationsService{
+		FetchRemediationsFunc: func(subphrases [][]string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"status": "OK",
+				"hashes": []string{"1234567890abcdef1234567890abcdef"},
+			}, nil
 		},
 	}
 
@@ -29,7 +51,7 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	handleTextInput(w, req, mockService)
+	handleTextInput(w, req, mockContextService, mockRemediationsService)
 
 	resp := w.Result()
 	if resp.StatusCode != http.StatusOK {
@@ -47,8 +69,14 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 }
 
 func TestHandleTextInputInvalidJSON(t *testing.T) {
-	mockService := &MockContextService{
+	mockContextService := &MockContextService{
 		SendMessageFunc: func(message string) (map[string]interface{}, error) {
+			return nil, nil
+		},
+	}
+
+	mockRemediationsService := &MockRemediationsService{
+		FetchRemediationsFunc: func(subphrases [][]string) (map[string]interface{}, error) {
 			return nil, nil
 		},
 	}
@@ -58,7 +86,7 @@ func TestHandleTextInputInvalidJSON(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	handleTextInput(w, req, mockService)
+	handleTextInput(w, req, mockContextService, mockRemediationsService)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("handler returned wrong status code for invalid JSON: got %v want %v", w.Code, http.StatusBadRequest)
@@ -70,8 +98,14 @@ func TestHandleTextInputInvalidJSON(t *testing.T) {
 }
 
 func TestHandleTextInputEmptyBody(t *testing.T) {
-	mockService := &MockContextService{
+	mockContextService := &MockContextService{
 		SendMessageFunc: func(message string) (map[string]interface{}, error) {
+			return nil, nil
+		},
+	}
+
+	mockRemediationsService := &MockRemediationsService{
+		FetchRemediationsFunc: func(subphrases [][]string) (map[string]interface{}, error) {
 			return nil, nil
 		},
 	}
@@ -81,10 +115,9 @@ func TestHandleTextInputEmptyBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-
 	rr := httptest.NewRecorder()
 
-	handleTextInput(rr, req, mockService)
+	handleTextInput(rr, req, mockContextService, mockRemediationsService)
 
 	if status := rr.Code; status != http.StatusBadRequest {
 		t.Errorf("handler returned wrong status code for empty body: got %v want %v", status, http.StatusBadRequest)
@@ -92,8 +125,14 @@ func TestHandleTextInputEmptyBody(t *testing.T) {
 }
 
 func TestHandleTextInputWrongMethod(t *testing.T) {
-	mockService := &MockContextService{
+	mockContextService := &MockContextService{
 		SendMessageFunc: func(message string) (map[string]interface{}, error) {
+			return nil, nil
+		},
+	}
+
+	mockRemediationsService := &MockRemediationsService{
+		FetchRemediationsFunc: func(subphrases [][]string) (map[string]interface{}, error) {
 			return nil, nil
 		},
 	}
@@ -102,10 +141,9 @@ func TestHandleTextInputWrongMethod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	rr := httptest.NewRecorder()
 
-	handleTextInput(rr, req, mockService)
+	handleTextInput(rr, req, mockContextService, mockRemediationsService)
 
 	if status := rr.Code; status != http.StatusMethodNotAllowed {
 		t.Errorf("handler returned wrong status code for wrong method: got %v want %v",

@@ -49,7 +49,57 @@ func (s *RealContextService) SendMessage(message string) (map[string]interface{}
 	return response, nil
 }
 
-func handleTextInput(w http.ResponseWriter, r *http.Request, contextService ContextService) {
+type RemediationsService interface {
+	FetchRemediations(subphrases [][]string) (map[string]interface{}, error)
+}
+
+type RealRemediationsService struct {
+	URL string
+}
+
+func (s *RealRemediationsService) FetchRemediations(subphrases [][]string) (map[string]interface{}, error) {
+	// Filter subphrases to only include pairs
+	var pairs [][]string
+	for _, subphrase := range subphrases {
+		if len(subphrase) == 2 {
+			pairs = append(pairs, subphrase)
+		}
+	}
+
+	// Prepare request payload
+	requestData := map[string]interface{}{
+		"pairs": pairs,
+	}
+
+	requestJSON, err := json.Marshal(requestData)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling remediations request: %w", err)
+	}
+
+	// Send request to remediations service
+	resp, err := http.Post(s.URL+"/remediate", "application/json", bytes.NewBuffer(requestJSON))
+	if err != nil {
+		return nil, fmt.Errorf("error calling remediations service: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("Response from remediations service: %s", string(body))
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("remediations service error: %s, Status Code: %d", string(body), resp.StatusCode)
+	}
+
+	var response map[string]interface{}
+	if err := json.Unmarshal(body, &response); err != nil {
+		log.Printf("Error parsing remediations service response: %v", err)
+		return nil, fmt.Errorf("invalid response from remediations service")
+	}
+
+	return response, nil
+}
+
+func handleTextInput(w http.ResponseWriter, r *http.Request, contextService ContextService, remediationsService RemediationsService) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -96,6 +146,38 @@ func handleTextInput(w http.ResponseWriter, r *http.Request, contextService Cont
 		return
 	}
 
+	// Extract newSubphrases from the context service response
+	newSubphrases, ok := contextResponse["newSubphrases"].([]interface{})
+	if !ok {
+		log.Printf("Error: newSubphrases not found in context response or has unexpected type")
+		http.Error(w, "Invalid response from context service", http.StatusInternalServerError)
+		return
+	}
+
+	// Convert newSubphrases to the expected format for remediations service
+	var subphrasesForRemediations [][]string
+	for _, subphrase := range newSubphrases {
+		if subphraseArray, ok := subphrase.([]interface{}); ok {
+			var stringArray []string
+			for _, word := range subphraseArray {
+				if str, ok := word.(string); ok {
+					stringArray = append(stringArray, str)
+				}
+			}
+			subphrasesForRemediations = append(subphrasesForRemediations, stringArray)
+		}
+	}
+
+	// Call remediations service with the filtered subphrases
+	remediationsResponse, err := remediationsService.FetchRemediations(subphrasesForRemediations)
+	if err != nil {
+		log.Printf("Error fetching remediations: %v", err)
+		// Continue without remediations for now
+	} else {
+		log.Printf("Remediations response: %v", remediationsResponse)
+		// For now, we'll just log the response, not returning it to the client
+	}
+
 	// Respond to the client with the version from the context service
 	response := map[string]interface{}{
 		"status":  "success",
@@ -118,8 +200,14 @@ func main() {
 	}
 	contextService := &RealContextService{URL: contextServiceURL}
 
+	remediationsServiceURL := os.Getenv("REMEDIATIONS_SERVICE_URL")
+	if remediationsServiceURL == "" {
+		log.Fatal("REMEDIATIONS_SERVICE_URL environment variable is not set")
+	}
+	remediationsService := &RealRemediationsService{URL: remediationsServiceURL}
+
 	http.HandleFunc("/ingest", func(w http.ResponseWriter, r *http.Request) {
-		handleTextInput(w, r, contextService)
+		handleTextInput(w, r, contextService, remediationsService)
 	})
 
 	log.Printf("Server starting on port %s...\n", port)

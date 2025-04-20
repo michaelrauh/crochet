@@ -7,22 +7,22 @@ services:
       - "8080:8080"
     depends_on:
       - context
-      - jaeger  # Add dependency on jaeger
+      - jaeger
     networks:
       - app-network
     environment:
-      - CONTEXT_SERVICE_URL=http://context:8081  # Correctly point to the context service
+      - INGESTOR_SERVICE_NAME=ingestor
+      - INGESTOR_CONTEXT_SERVICE_URL=http://context:8081
       - INGESTOR_PORT=8080
-      - REMEDIATIONS_SERVICE_URL=http://remediations:8082  # Add URL for remediations service
-      - JAEGER_AGENT_HOST=jaeger  # Add Jaeger agent host
-      - JAEGER_AGENT_PORT=6831    # Add Jaeger agent port
-      - JAEGER_SERVICE_NAME=ingestor # Service name for tracing
+      - INGESTOR_REMEDIATIONS_SERVICE_URL=http://remediations:8082
+      - INGESTOR_JAEGER_ENDPOINT=jaeger:4317
+      - INGESTOR_HOST=0.0.0.0
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
+  
   context:
     build:
       context: .
@@ -32,7 +32,7 @@ services:
     networks:
       - app-network
     depends_on:
-      - jaeger  # Add dependency on jaeger
+      - jaeger
     healthcheck:
       test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/health | grep -q 200 || (echo 'Health check failed' && exit 1)"]
       interval: 5s
@@ -42,15 +42,13 @@ services:
     environment:
       - CONTEXT_PORT=8081
       - CONTEXT_HOST=0.0.0.0
-      - JAEGER_AGENT_HOST=jaeger  # Add Jaeger agent host
-      - JAEGER_AGENT_PORT=6831    # Add Jaeger agent port
-      - JAEGER_SERVICE_NAME=context # Service name for tracing
+      - JAEGER_ENDPOINT=jaeger:4317
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
+  
   remediations:
     build:
       context: .
@@ -60,36 +58,32 @@ services:
     networks:
       - app-network
     depends_on:
-      - jaeger  # Add dependency on jaeger
+      - jaeger
     environment:
       - REMEDIATIONS_PORT=8082
-      - JAEGER_AGENT_HOST=jaeger  # Add Jaeger agent host
-      - JAEGER_AGENT_PORT=6831    # Add Jaeger agent port
-      - JAEGER_SERVICE_NAME=remediations # Service name for tracing
+      - REMEDIATIONS_HOST=0.0.0.0
+      - JAEGER_ENDPOINT=jaeger:4317
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
+  
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
-      - "5775:5775/udp"   # accept zipkin.thrift over compact thrift protocol
       - "6831:6831/udp"   # accept jaeger.thrift over compact thrift protocol
       - "6832:6832/udp"   # accept jaeger.thrift over binary thrift protocol
       - "5778:5778"       # serve configs
       - "16686:16686"     # serve frontend
       - "14268:14268"     # accept jaeger.thrift directly from clients
       - "14250:14250"     # accept model.proto
+      - "4317:4317"       # OTLP gRPC endpoint
+      - "4318:4318"       # OTLP HTTP endpoint
     networks:
       - app-network
     environment:
-      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
       - COLLECTOR_OTLP_ENABLED=true
-      - QUERY_BASE_PATH=/
-      - SAMPLING_STRATEGIES_FILE=/etc/jaeger/sampling_strategies.json
-      - LOG_LEVEL=debug
     restart: always
 
 networks:

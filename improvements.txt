@@ -1,0 +1,81 @@
+# Crochet Project Improvement Steps
+
+1. ✅ Create a shared package for Jaeger/OpenTelemetry initialization
+   - All three services implement similar tracing setup code
+   - Move initJaeger function to a common "telemetry" package
+
+2. ✅ Standardize error handling across services
+   - Implement common error types and handler functions
+   - Created shared ServiceError type and error handling utilities in telemetry package
+
+3. ✅ Extract HTTP client functionality to a shared package
+   - Ingestor's callExternalService function could be reused by all services
+
+4. ✅ Implement unified configuration management
+   - All services have similar environment variable loading
+   - Create a shared config package with typed configuration structs
+
+5. ✅ Develop common health check implementation
+   - Each service implements its own health check handler
+   - Create a reusable health check middleware/handler
+
+6. Create a shared logging package
+   - Standardize log formats and levels across services
+   - Add structured logging with context correlation IDs
+
+7. Implement unified middleware handling
+   - Move the ErrorHandler middleware to a common package
+   - Add standard middleware for request logging, panic recovery, etc.
+
+8. Extract service response/request types to a shared package
+   - Many data types (like RemediationRequest) are defined in multiple services
+   - Create common data models to ensure consistency
+
+9. Implement a common service framework
+   - Each service has similar setup patterns for HTTP handlers and server startup
+   - Create a service framework to reduce boilerplate code
+
+10. Add centralized metrics collection
+    - Integrate with OpenTelemetry metrics alongside the existing tracing
+    - Standardize metric names and collection methods across services
+
+11. Add pyroscope to all services
+    - Integrate pyroscope in to all services
+    - ensure configuration is centralized and not duplicated across services
+
+12. Make Context process additions to pairs and vocabulary in order
+    - This can be slow and will only hold up ingestion
+    - Make ingestion process in order too. In fact, context may not need to be updated if ingestion is updated
+    - Aborting ingestion is OK but making it wait a little is better
+    - Version checks should still be fast
+
+13. Make Remediations thread safe
+    - Write time consistency is not important, but read time consistency is very important
+    - Do not worry about durability yet
+
+15. Create an orthos server
+    - It should have fast probabilistic checks and nonprobabalistic checks possible
+
+16. Have ingestor call orthos 
+
+14. Make sure remediations have referential integrity to orthos
+    - If write to orthos fails, abort write to remediations 
+
+16. Create a work server 
+   
+17. Work server should have queue semantics 
+    - Back it with rabbitMQ and forward (n)ack 
+
+18. Have ingestor call the work server 
+    - Play remediations
+    - Play an empty ortho 
+
+19. Implement the worker server 
+    - Implement call pattern
+    - Implement search logic 
+
+20. Make the services scalable 
+    - Make sure storage backends can scale 
+    - Make state durable 
+    - Move to K8s 
+    - Add a jump host 

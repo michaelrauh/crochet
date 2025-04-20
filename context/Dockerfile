@@ -1,22 +1,24 @@
 FROM golang:1.24 AS builder
-
 WORKDIR /app
+
+# Copy the telemetry module first
+COPY ./telemetry/ ./telemetry/
 
 # Copy the context go.mod file
 COPY ./context/go.mod ./context/
 
 # Generate go.sum during the build process
 WORKDIR /app/context
+RUN go mod edit -replace=crochet/telemetry=../telemetry
 RUN go mod tidy
 
 # Download dependencies
 RUN go mod download
 
-# Get Jaeger dependencies
-RUN go get github.com/opentracing/opentracing-go
-RUN go get github.com/opentracing/opentracing-go/ext
-RUN go get github.com/uber/jaeger-client-go
-RUN go get github.com/uber/jaeger-client-go/config
+# Get OpenTelemetry dependencies
+RUN go get go.opentelemetry.io/otel
+RUN go get go.opentelemetry.io/otel/trace
+RUN go get crochet/telemetry
 
 # Install curl
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
@@ -28,7 +30,6 @@ COPY ./context/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o main ./main.go
 
 FROM alpine:latest
-
 WORKDIR /app
 
 # Copy the built binary from the builder stage

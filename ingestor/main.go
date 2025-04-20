@@ -1,27 +1,58 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
+	"crochet/config"
+	"crochet/httpclient"
+	"crochet/telemetry"
 	"crochet/text"
 
-	"github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
-	"github.com/uber/jaeger-client-go"
-	"github.com/uber/jaeger-client-go/config"
+	"github.com/gin-gonic/gin"
+	"github.com/mitchellh/mapstructure"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
+// For backwards compatibility - use the shared error type under the hood
+func NewIngestorError(code int, message string) *telemetry.ServiceError {
+	return telemetry.NewServiceError("ingestor", code, message)
+}
+
+// Keeping these type definitions local to ingestor for now
+// Later they can be moved to a shared types package (improvement #8)
+
 type Corpus struct {
-	Title string `json:"title"`
-	Text  string `json:"text"`
+	Title string `mapstructure:"title"`
+	Text  string `mapstructure:"text"`
+}
+
+// ContextInput represents the data sent to the context service
+type ContextInput struct {
+	Title      string     `mapstructure:"title"`
+	Vocabulary []string   `mapstructure:"vocabulary"`
+	Subphrases [][]string `mapstructure:"subphrases"`
+}
+
+// ContextResponse represents the response from the context service
+type ContextResponse struct {
+	Version       int        `mapstructure:"version"`
+	NewSubphrases [][]string `mapstructure:"newSubphrases"`
+}
+
+// RemediationRequest represents the request data for the remediation service
+type RemediationRequest struct {
+	Pairs [][]string `mapstructure:"pairs"`
+}
+
+// RemediationResponse represents the response from the remediation service
+type RemediationResponse struct {
+	Status string   `mapstructure:"status"`
+	Hashes []string `mapstructure:"hashes"`
 }
 
 type ContextService interface {
@@ -29,55 +60,18 @@ type ContextService interface {
 }
 
 type RealContextService struct {
-	URL string
+	URL    string
+	Client *httpclient.Client
 }
 
 func (s *RealContextService) SendMessage(ctx context.Context, message string) (map[string]interface{}, error) {
-	// Create a new request with the current context
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.URL+"/input", bytes.NewBuffer([]byte(message)))
-	if err != nil {
-		return nil, fmt.Errorf("error creating request to context service: %w", err)
+	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/input", []byte(message))
+	if serviceResp.Error != nil {
+		return nil, fmt.Errorf("error calling context service: %w", serviceResp.Error)
 	}
 
-	// Get the current span and inject its context into the HTTP headers
-	span := opentracing.SpanFromContext(ctx)
-	if span != nil {
-		// Inject the span context into the HTTP request headers
-		err = opentracing.GlobalTracer().Inject(
-			span.Context(),
-			opentracing.HTTPHeaders,
-			opentracing.HTTPHeadersCarrier(req.Header),
-		)
-		if err != nil {
-			log.Printf("Error injecting span context: %v", err)
-		}
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	// Send the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error calling context service: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	log.Printf("Response from context service: %s", string(body))
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("context service error: %s, Status Code: %d", string(body), resp.StatusCode)
-	}
-
-	var response map[string]interface{}
-	if err := json.Unmarshal(body, &response); err != nil {
-		log.Printf("Error parsing context service response: %v", err)
-		return nil, fmt.Errorf("invalid response from context service")
-	}
-
-	log.Printf("Parsed response: %v", response)
-	return response, nil
+	log.Printf("Parsed context service response: %v", serviceResp.RawResponse)
+	return serviceResp.RawResponse, nil
 }
 
 type RemediationsService interface {
@@ -85,11 +79,11 @@ type RemediationsService interface {
 }
 
 type RealRemediationsService struct {
-	URL string
+	URL    string
+	Client *httpclient.Client
 }
 
 func (s *RealRemediationsService) FetchRemediations(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
-	// Filter subphrases to only include pairs
 	var pairs [][]string
 	for _, subphrase := range subphrases {
 		if len(subphrase) == 2 {
@@ -97,289 +91,213 @@ func (s *RealRemediationsService) FetchRemediations(ctx context.Context, subphra
 		}
 	}
 
-	// Prepare request payload
-	requestData := map[string]interface{}{
-		"pairs": pairs,
+	// Use mapstructure to encode the request data
+	requestData := RemediationRequest{
+		Pairs: pairs,
 	}
 
+	// We still need to marshal to JSON for the HTTP request
 	requestJSON, err := json.Marshal(requestData)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling remediations request: %w", err)
 	}
 
-	// Create a new request
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.URL+"/remediate", bytes.NewBuffer(requestJSON))
-	if err != nil {
-		return nil, fmt.Errorf("error creating request to remediations service: %w", err)
+	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/remediate", requestJSON)
+	if serviceResp.Error != nil {
+		return nil, fmt.Errorf("error calling remediations service: %w", serviceResp.Error)
 	}
 
-	// Get the current span and inject its context into the HTTP headers
-	span := opentracing.SpanFromContext(ctx)
-	if span != nil {
-		// Inject the span context into the HTTP request headers
-		err = opentracing.GlobalTracer().Inject(
-			span.Context(),
-			opentracing.HTTPHeaders,
-			opentracing.HTTPHeadersCarrier(req.Header),
-		)
-		if err != nil {
-			log.Printf("Error injecting span context: %v", err)
+	return serviceResp.RawResponse, nil
+}
+
+// Helper functions for ginHandleTextInput
+func processIncomingCorpus(c *gin.Context) (*Corpus, error) {
+	var rawData map[string]interface{}
+	if err := c.ShouldBindJSON(&rawData); err != nil {
+		return nil, NewIngestorError(http.StatusBadRequest, "Invalid JSON format")
+	}
+
+	// Convert raw data to Corpus struct using mapstructure
+	var corpus Corpus
+	if err := mapstructure.Decode(rawData, &corpus); err != nil {
+		return nil, NewIngestorError(http.StatusBadRequest, "Invalid data format")
+	}
+
+	return &corpus, nil
+}
+
+func prepareContextServiceInput(corpus *Corpus) ([]byte, error) {
+	subphrases := text.GenerateSubphrases(corpus.Text)
+	vocabulary := text.Vocabulary(corpus.Text)
+
+	// Create a structured object for context input
+	contextInput := ContextInput{
+		Title:      corpus.Title,
+		Vocabulary: vocabulary,
+		Subphrases: subphrases,
+	}
+
+	// Marshal to JSON for HTTP request
+	return json.Marshal(contextInput)
+}
+
+func processContextResponse(rawResponse map[string]interface{}) (*ContextResponse, error) {
+	var response ContextResponse
+	if err := mapstructure.Decode(rawResponse, &response); err != nil {
+		return nil, fmt.Errorf("error decoding context service response: %w", err)
+	}
+
+	// If newSubphrases is nil, initialize it to an empty slice
+	if response.NewSubphrases == nil {
+		response.NewSubphrases = [][]string{}
+	}
+
+	return &response, nil
+}
+
+func extractPairsFromSubphrases(subphrases [][]string) [][]string {
+	var pairs [][]string
+	for _, subphrase := range subphrases {
+		if len(subphrase) == 2 {
+			pairs = append(pairs, subphrase)
 		}
 	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	// Send the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error calling remediations service: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	log.Printf("Response from remediations service: %s", string(body))
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("remediations service error: %s, Status Code: %d", string(body), resp.StatusCode)
-	}
-
-	var response map[string]interface{}
-	if err := json.Unmarshal(body, &response); err != nil {
-		log.Printf("Error parsing remediations service response: %v", err)
-		return nil, fmt.Errorf("invalid response from remediations service")
-	}
-
-	return response, nil
+	return pairs
 }
 
-func initJaeger(service string) (opentracing.Tracer, io.Closer) {
-	// Use a more direct endpoint configuration for Jaeger HTTP reporter
-	cfg := &config.Configuration{
-		ServiceName: service,
-		Sampler: &config.SamplerConfig{
-			Type:  jaeger.SamplerTypeConst,
-			Param: 1, // Sample 100% of traces
-		},
-		Reporter: &config.ReporterConfig{
-			LogSpans:            true,
-			CollectorEndpoint:   "http://jaeger:14268/api/traces", // Direct HTTP endpoint
-			BufferFlushInterval: 1 * time.Second,
-		},
+func processRemediationsResponse(rawResponse map[string]interface{}) (*RemediationResponse, error) {
+	var response RemediationResponse
+	if err := mapstructure.Decode(rawResponse, &response); err != nil {
+		return nil, fmt.Errorf("error decoding remediations response: %w", err)
 	}
-
-	// Initialize the tracer with the configuration
-	tracer, closer, err := cfg.NewTracer(config.Logger(jaeger.StdLogger))
-	if err != nil {
-		log.Fatalf("Cannot initialize Jaeger Tracer: %s", err.Error())
-	}
-
-	log.Printf("Jaeger tracer initialized for service: %s, reporting directly to collector endpoint", service)
-
-	return tracer, closer
+	return &response, nil
 }
 
-func handleTextInput(w http.ResponseWriter, r *http.Request, contextService ContextService, remediationsService RemediationsService) {
-	// Extract the tracing context from the incoming request
-	spanCtx, _ := opentracing.GlobalTracer().Extract(
-		opentracing.HTTPHeaders,
-		opentracing.HTTPHeadersCarrier(r.Header),
-	)
-
-	// Create a new span for this request
-	span := opentracing.GlobalTracer().StartSpan(
-		"handleTextInput",
-		ext.RPCServerOption(spanCtx),
-	)
-	defer span.Finish()
-
-	// Set operation-specific tags
-	span.SetTag("http.method", r.Method)
-	span.SetTag("http.url", r.URL.String())
-
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		span.SetTag("error", true)
-		span.SetTag("http.status_code", http.StatusMethodNotAllowed)
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
+func ginHandleTextInput(c *gin.Context, contextService ContextService, remediationsService RemediationsService) {
+	// Process the incoming request
+	corpus, err := processIncomingCorpus(c)
 	if err != nil {
-		http.Error(w, "Error reading request body", http.StatusInternalServerError)
-		span.SetTag("error", true)
-		span.SetTag("http.status_code", http.StatusInternalServerError)
-		span.LogKV("event", "error", "message", err.Error())
-		return
-	}
-	defer r.Body.Close()
-
-	var corpus Corpus
-	if err := json.Unmarshal(body, &corpus); err != nil {
-		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
-		span.SetTag("error", true)
-		span.SetTag("http.status_code", http.StatusBadRequest)
-		span.LogKV("event", "error", "message", err.Error())
+		c.Error(err) // Use Gin's error handling
 		return
 	}
 
-	span.LogKV("event", "received corpus", "title", corpus.Title)
 	fmt.Printf("Title: %s\nText: %s\n", corpus.Title, corpus.Text)
 
-	// Create child span for processing
-	processSpan := opentracing.StartSpan(
-		"processText",
-		opentracing.ChildOf(span.Context()),
-	)
-
-	// Process the text using methods from crochet/text
-	subphrases := text.GenerateSubphrases(corpus.Text) // Generate subphrases
-	vocabulary := text.Vocabulary(corpus.Text)         // Generate vocabulary
-
-	processSpan.LogKV(
-		"event", "processed text",
-		"subphrases_count", len(subphrases),
-		"vocabulary_size", len(vocabulary),
-	)
-	processSpan.Finish()
-
-	// Prepare the data to send to the context service
-	contextInput := map[string]interface{}{
-		"title":      corpus.Title,
-		"vocabulary": vocabulary,
-		"subphrases": subphrases,
-	}
-
-	contextInputJSON, err := json.Marshal(contextInput)
+	// Prepare and send request to the context service
+	contextInputJSON, err := prepareContextServiceInput(corpus)
 	if err != nil {
 		log.Printf("Error preparing data for context service: %v", err)
-		http.Error(w, "Error preparing data for context service", http.StatusInternalServerError)
-		span.SetTag("error", true)
-		span.SetTag("http.status_code", http.StatusInternalServerError)
-		span.LogKV("event", "error", "message", err.Error())
+		c.Error(NewIngestorError(http.StatusInternalServerError, "Error preparing data for context service"))
 		return
 	}
 
-	// Create child span for context service call
-	contextSpan := opentracing.StartSpan(
-		"callContextService",
-		opentracing.ChildOf(span.Context()),
-	)
-	contextSpan.SetTag("service", "context")
-
-	// Create a new context containing the span
-	ctx := opentracing.ContextWithSpan(context.Background(), contextSpan)
-
-	// Forward the processed data to the context service
-	contextResponse, err := contextService.SendMessage(ctx, string(contextInputJSON))
-
+	ctx := c.Request.Context()
+	contextResponseRaw, err := contextService.SendMessage(ctx, string(contextInputJSON))
 	if err != nil {
 		log.Printf("Error sending message to context service: %v", err)
-		http.Error(w, "Error calling context service", http.StatusInternalServerError)
-		contextSpan.SetTag("error", true)
-		contextSpan.LogKV("event", "error", "message", err.Error())
-		contextSpan.Finish()
-		span.SetTag("error", true)
-		span.SetTag("http.status_code", http.StatusInternalServerError)
+		// Check if this is already a custom error, if not, wrap it
+		if serviceErr, ok := err.(*telemetry.ServiceError); ok {
+			c.Error(serviceErr)
+		} else {
+			c.Error(NewIngestorError(http.StatusInternalServerError, "Error calling context service"))
+		}
 		return
 	}
 
-	contextSpan.LogKV("event", "context service response received")
-	contextSpan.Finish()
-
-	// Extract newSubphrases from the context service response
-	newSubphrases, ok := contextResponse["newSubphrases"]
-	if !ok || newSubphrases == nil {
-		log.Printf("No new subphrases returned from context service or field is nil")
-		// Initialize empty array and continue instead of returning an error
-		newSubphrases = []interface{}{}
+	// Process the context service response
+	contextResponse, err := processContextResponse(contextResponseRaw)
+	if err != nil {
+		log.Printf("%v", err)
+		c.Error(NewIngestorError(http.StatusInternalServerError, "Invalid response from context service"))
+		return
 	}
 
-	// Initialize subphrasesForRemediations outside of conditional blocks
-	var subphrasesForRemediations [][]string
+	// Extract pairs and call remediations service
+	subphrasesForRemediations := extractPairsFromSubphrases(contextResponse.NewSubphrases)
+	remediationsResponseRaw, err := remediationsService.FetchRemediations(ctx, subphrasesForRemediations)
 
-	// Convert newSubphrases to the expected format for remediations service
-	if subphrasesArray, ok := newSubphrases.([]interface{}); ok {
-		for _, subphrase := range subphrasesArray {
-			if subphraseArray, ok := subphrase.([]interface{}); ok {
-				var stringArray []string
-				for _, word := range subphraseArray {
-					if str, ok := word.(string); ok {
-						stringArray = append(stringArray, str)
-					}
-				}
-				subphrasesForRemediations = append(subphrasesForRemediations, stringArray)
-			}
-		}
-	} else {
-		log.Printf("newSubphrases has unexpected type: %T", newSubphrases)
-	}
-
-	// Create child span for remediations service call
-	remediationsSpan := opentracing.StartSpan(
-		"callRemediationsService",
-		opentracing.ChildOf(span.Context()),
-	)
-	remediationsSpan.SetTag("service", "remediations")
-	remediationsSpan.LogKV("event", "calling remediations service", "pairs_count", len(subphrasesForRemediations))
-
-	// Create a new context containing the span
-	ctx = opentracing.ContextWithSpan(context.Background(), remediationsSpan)
-
-	// Call remediations service with the filtered subphrases
-	remediationsResponse, err := remediationsService.FetchRemediations(ctx, subphrasesForRemediations)
+	// Process remediations service response if available
 	if err != nil {
 		log.Printf("Error fetching remediations: %v", err)
-		remediationsSpan.SetTag("error", true)
-		remediationsSpan.LogKV("event", "error", "message", err)
-		// Continue without remediations for now
+		// We continue even if remediations service fails
 	} else {
-		log.Printf("Remediations response: %v", remediationsResponse)
-		remediationsSpan.LogKV("event", "remediations received")
-		// For now, we'll just log the response, not returning it to the client
+		remediationsResponse, err := processRemediationsResponse(remediationsResponseRaw)
+		if err != nil {
+			log.Printf("%v", err)
+			// We continue even if processing fails
+		} else {
+			log.Printf("Remediations response: status=%s, hashes=%v",
+				remediationsResponse.Status, remediationsResponse.Hashes)
+		}
 	}
-	remediationsSpan.Finish()
 
-	// Respond to the client with the version from the context service
-	response := map[string]interface{}{
+	// Return response to client
+	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
-		"version": contextResponse["version"],
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	span.SetTag("http.status_code", http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+		"version": contextResponse.Version,
+	})
 }
 
 func main() {
-	// Initialize Jaeger tracer
-	tracer, closer := initJaeger("ingestor")
-	defer closer.Close()
-	opentracing.SetGlobalTracer(tracer)
-
-	port := os.Getenv("INGESTOR_PORT")
-	if port == "" {
-		panic("INGESTOR_PORT environment variable is not set")
+	// Load configuration using the shared config package
+	cfg, err := config.LoadIngestorConfig()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	contextServiceURL := os.Getenv("CONTEXT_SERVICE_URL")
-	if contextServiceURL == "" {
-		log.Fatal("CONTEXT_SERVICE_URL environment variable is not set")
-	}
-	contextService := &RealContextService{URL: contextServiceURL}
+	// Log the config for debugging - this shows we're using the new shared config package
+	log.Printf("[SHARED CONFIG] Using unified configuration management: %+v", cfg)
+	config.LogConfig(cfg)
 
-	remediationsServiceURL := os.Getenv("REMEDIATIONS_SERVICE_URL")
-	if remediationsServiceURL == "" {
-		log.Fatal("REMEDIATIONS_SERVICE_URL environment variable is not set")
+	// Initialize OpenTelemetry with the shared telemetry package
+	tp, err := telemetry.InitTracer(cfg.ServiceName, cfg.JaegerEndpoint)
+	if err != nil {
+		log.Fatalf("Failed to initialize OpenTelemetry: %v", err)
 	}
-	remediationsService := &RealRemediationsService{URL: remediationsServiceURL}
+	defer tp.ShutdownWithTimeout(5 * time.Second)
 
-	http.HandleFunc("/ingest", func(w http.ResponseWriter, r *http.Request) {
-		handleTextInput(w, r, contextService, remediationsService)
+	// Create a shared HTTP client with options from config
+	httpClientOptions := httpclient.ClientOptions{
+		DialTimeout:   cfg.DialTimeout,
+		DialKeepAlive: cfg.DialKeepAlive,
+		MaxIdleConns:  cfg.MaxIdleConns,
+		ClientTimeout: cfg.ClientTimeout,
+	}
+
+	// If no custom options set, use defaults
+	httpClient := httpclient.NewClient(httpClientOptions)
+
+	// Initialize services with the shared HTTP client
+	contextService := &RealContextService{
+		URL:    cfg.ContextServiceURL,
+		Client: httpClient,
+	}
+	remediationsService := &RealRemediationsService{
+		URL:    cfg.RemediationsServiceURL,
+		Client: httpClient,
+	}
+
+	// Replace gin.Default() with explicit configuration
+	router := gin.New()
+
+	// Add explicitly chosen middleware instead of using defaults
+	router.Use(gin.Recovery())
+	router.Use(gin.Logger())
+
+	// Add custom middleware - use the shared error handler
+	router.Use(telemetry.GinErrorHandler())
+	router.Use(otelgin.Middleware(cfg.ServiceName))
+
+	router.POST("/ingest", func(c *gin.Context) {
+		// Add the config to the request context
+		ctxWithConfig := context.WithValue(c.Request.Context(), "config", cfg)
+		c.Request = c.Request.WithContext(ctxWithConfig)
+		ginHandleTextInput(c, contextService, remediationsService)
 	})
 
-	log.Printf("Server starting on port %s...\n", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	address := cfg.GetAddress()
+	log.Printf("Server starting on %s...\n", address)
+	if err := router.Run(address); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
 }

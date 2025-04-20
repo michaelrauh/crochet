@@ -6,9 +6,47 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"os"
 	"testing"
+
+	"crochet/telemetry"
+
+	"github.com/gin-gonic/gin"
 )
+
+func setupTestEnvironment() {
+	// Set required environment variables for tests using the new config format
+	os.Setenv("INGESTOR_SERVICE_NAME", "ingestor")
+	os.Setenv("INGESTOR_HOST", "0.0.0.0")
+	os.Setenv("INGESTOR_PORT", "8080")
+	os.Setenv("INGESTOR_JAEGER_ENDPOINT", "jaeger:4317")
+	os.Setenv("INGESTOR_CONTEXT_SERVICE_URL", "http://context:8081")
+	os.Setenv("INGESTOR_REMEDIATIONS_SERVICE_URL", "http://remediations:8082")
+}
+
+func teardownTestEnvironment() {
+	// Clear environment variables after tests
+	os.Unsetenv("INGESTOR_SERVICE_NAME")
+	os.Unsetenv("INGESTOR_HOST")
+	os.Unsetenv("INGESTOR_PORT")
+	os.Unsetenv("INGESTOR_JAEGER_ENDPOINT")
+	os.Unsetenv("INGESTOR_CONTEXT_SERVICE_URL")
+	os.Unsetenv("INGESTOR_REMEDIATIONS_SERVICE_URL")
+}
+
+// TestMain handles setup and teardown for all tests
+func TestMain(m *testing.M) {
+	// Setup test environment
+	setupTestEnvironment()
+
+	// Run tests
+	code := m.Run()
+
+	// Cleanup
+	teardownTestEnvironment()
+
+	os.Exit(code)
+}
 
 type MockContextService struct {
 	SendMessageFunc func(ctx context.Context, message string) (map[string]interface{}, error)
@@ -24,6 +62,19 @@ type MockRemediationsService struct {
 
 func (m *MockRemediationsService) FetchRemediations(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
 	return m.FetchRemediationsFunc(ctx, subphrases)
+}
+
+// setupGinRouter creates a test Gin router with the specified handlers
+func setupGinRouter(contextService ContextService, remediationsService RemediationsService) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New() // Use New instead of Default to avoid default middleware
+	r.Use(gin.Recovery())
+	r.Use(telemetry.GinErrorHandler()) // Use the shared error handler middleware
+
+	r.POST("/ingest", func(c *gin.Context) {
+		ginHandleTextInput(c, contextService, remediationsService)
+	})
+	return r
 }
 
 func TestHandleTextInputValidJSON(t *testing.T) {
@@ -47,20 +98,21 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 		},
 	}
 
+	router := setupGinRouter(mockContextService, mockRemediationsService)
+
 	body := `{"title": "Test Title", "text": "Test Content"}`
-	req := httptest.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
+	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+
 	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
 
-	handleTextInput(w, req, mockContextService, mockRemediationsService)
-
-	resp := w.Result()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("handler returned wrong status code: got %v want %v", resp.StatusCode, http.StatusOK)
+	if w.Code != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", w.Code, http.StatusOK)
 	}
 
 	var response map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Errorf("json.Unmarshal failed for actual response: %v", err)
 	}
 
@@ -82,19 +134,26 @@ func TestHandleTextInputInvalidJSON(t *testing.T) {
 		},
 	}
 
-	invalidJSON := `{title:"Invalid JSON"}`
-	req := httptest.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(invalidJSON))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
+	router := setupGinRouter(mockContextService, mockRemediationsService)
 
-	handleTextInput(w, req, mockContextService, mockRemediationsService)
+	invalidJSON := `{title:"Invalid JSON"}`
+	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(invalidJSON))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("handler returned wrong status code for invalid JSON: got %v want %v", w.Code, http.StatusBadRequest)
 	}
 
-	if !strings.Contains(w.Body.String(), "Invalid JSON format") {
-		t.Errorf("handler returned unexpected error message: got %v want to contain %v", w.Body.String(), "Invalid JSON format")
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Errorf("json.Unmarshal failed for error response: %v", err)
+	}
+
+	if _, ok := response["error"]; !ok {
+		t.Errorf("response does not contain error field: %v", response)
 	}
 }
 
@@ -111,17 +170,16 @@ func TestHandleTextInputEmptyBody(t *testing.T) {
 		},
 	}
 
-	req, err := http.NewRequest("POST", "/ingest", bytes.NewBufferString(""))
-	if err != nil {
-		t.Fatal(err)
-	}
+	router := setupGinRouter(mockContextService, mockRemediationsService)
+
+	req, _ := http.NewRequest("POST", "/ingest", bytes.NewBufferString(""))
 	req.Header.Set("Content-Type", "application/json")
-	rr := httptest.NewRecorder()
 
-	handleTextInput(rr, req, mockContextService, mockRemediationsService)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
 
-	if status := rr.Code; status != http.StatusBadRequest {
-		t.Errorf("handler returned wrong status code for empty body: got %v want %v", status, http.StatusBadRequest)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("handler returned wrong status code for empty body: got %v want %v", w.Code, http.StatusBadRequest)
 	}
 }
 
@@ -138,21 +196,98 @@ func TestHandleTextInputWrongMethod(t *testing.T) {
 		},
 	}
 
-	req, err := http.NewRequest("GET", "/ingest", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rr := httptest.NewRecorder()
+	router := setupGinRouter(mockContextService, mockRemediationsService)
 
-	handleTextInput(rr, req, mockContextService, mockRemediationsService)
+	req, _ := http.NewRequest("GET", "/ingest", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
 
-	if status := rr.Code; status != http.StatusMethodNotAllowed {
+	// Gin returns 404 Not Found for methods that don't match
+	if w.Code != http.StatusNotFound {
 		t.Errorf("handler returned wrong status code for wrong method: got %v want %v",
-			status, http.StatusMethodNotAllowed)
+			w.Code, http.StatusNotFound)
+	}
+}
+
+// Add a new test specifically for the mapstructure functionality
+func TestHandleTextInputWithMissingFields(t *testing.T) {
+	mockContextService := &MockContextService{
+		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"version": 1,
+			}, nil
+		},
 	}
 
-	if !strings.Contains(rr.Body.String(), "Method not allowed") {
-		t.Errorf("handler returned unexpected error message: got %v want to contain %v",
-			rr.Body.String(), "Method not allowed")
+	mockRemediationsService := &MockRemediationsService{
+		FetchRemediationsFunc: func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"status": "OK",
+			}, nil
+		},
+	}
+
+	router := setupGinRouter(mockContextService, mockRemediationsService)
+
+	// Missing the 'text' field
+	body := `{"title": "Test Title"}`
+	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	// The request should still succeed because mapstructure will set the text field to ""
+	if w.Code != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", w.Code, http.StatusOK)
+	}
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Errorf("json.Unmarshal failed for actual response: %v", err)
+	}
+
+	if response["status"] != "success" {
+		t.Errorf("unexpected response: got %v want %v", response["status"], "success")
+	}
+}
+
+// Add a new test for our error handling middleware
+func TestErrorHandlerMiddleware(t *testing.T) {
+	mockContextService := &MockContextService{
+		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
+			// Return our custom error directly - this simulates what will happen in the real service
+			return nil, NewIngestorError(http.StatusBadGateway, "Test middleware error")
+		},
+	}
+
+	mockRemediationsService := &MockRemediationsService{
+		FetchRemediationsFunc: func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
+			return nil, nil
+		},
+	}
+
+	router := setupGinRouter(mockContextService, mockRemediationsService)
+
+	body := `{"title": "Test Title", "text": "Test Content"}`
+	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	// Should return the status code from our custom error
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("middleware didn't handle custom error correctly: got %v want %v", w.Code, http.StatusBadGateway)
+	}
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Errorf("json.Unmarshal failed for error response: %v", err)
+	}
+
+	// Should include our error message
+	if response["error"] != "Test middleware error" {
+		t.Errorf("unexpected error message: got %v want %v", response["error"], "Test middleware error")
 	}
 }

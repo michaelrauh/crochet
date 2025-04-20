@@ -1,21 +1,19 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"crochet/middleware"
 	"crochet/telemetry"
 
+	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -32,13 +30,18 @@ type MemoryStore struct {
 var store MemoryStore
 var versionCounter int
 
+// NewContextError creates a new error specific to the context service
+func NewContextError(code int, message string) *telemetry.ServiceError {
+	return telemetry.NewServiceError("context", code, message)
+}
+
 func initStore() {
 	store = MemoryStore{
 		Vocabulary: make(map[string]struct{}),
 		Subphrases: make(map[string]struct{}),
 	}
 	versionCounter = 1
-	fmt.Println("In-memory store initialized successfully")
+	log.Println("In-memory store initialized successfully")
 }
 
 func saveVocabularyToStore(vocabulary []string) ([]string, error) {
@@ -64,41 +67,22 @@ func saveSubphrasesToStore(subphrases [][]string) ([][]string, error) {
 	return newlyAdded, nil
 }
 
-func handleInput(w http.ResponseWriter, r *http.Request) {
-	// Extract trace context from incoming request
-	ctx := r.Context()
-	propagator := otel.GetTextMapPropagator()
-	ctx = propagator.Extract(ctx, propagation.HeaderCarrier(r.Header))
-
-	// Create a span for this handler
+// Convert standard HTTP handlers to Gin handlers
+func ginHandleInput(c *gin.Context) {
+	// Get the tracer from the context
 	tracer := otel.Tracer("context-service")
-	ctx, span := tracer.Start(ctx, "handleInput")
+	ctx, span := tracer.Start(c.Request.Context(), "handleInput")
 	defer span.End()
 
-	log.Printf("Received request: %v", r)
+	// Create a new context with the span
+	c.Request = c.Request.WithContext(ctx)
 
-	if r.Method != http.MethodPost {
-		telemetry.WriteJSONError(w, "context", http.StatusMethodNotAllowed, "Method not allowed")
-		span.SetStatus(codes.Error, "Method not allowed")
-		span.SetAttributes(attribute.Int("http.status_code", http.StatusMethodNotAllowed))
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		telemetry.WriteJSONError(w, "context", http.StatusInternalServerError, "Error reading request body")
-		span.SetStatus(codes.Error, "Error reading request body")
-		span.SetAttributes(attribute.Int("http.status_code", http.StatusInternalServerError))
-		span.RecordError(err)
-		return
-	}
-	defer r.Body.Close()
+	log.Printf("Received request: %v", c.Request)
 
 	var input Input
-	if err := json.Unmarshal(body, &input); err != nil {
-		telemetry.WriteJSONError(w, "context", http.StatusBadRequest, "Invalid JSON format")
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.Error(NewContextError(http.StatusBadRequest, "Invalid JSON format"))
 		span.SetStatus(codes.Error, "Invalid JSON format")
-		span.SetAttributes(attribute.Int("http.status_code", http.StatusBadRequest))
 		span.RecordError(err)
 		return
 	}
@@ -108,12 +92,11 @@ func handleInput(w http.ResponseWriter, r *http.Request) {
 	vocabSpan.SetAttributes(attribute.Int("vocabulary_count", len(input.Vocabulary)))
 	newVocabulary, err := saveVocabularyToStore(input.Vocabulary)
 	if err != nil {
-		telemetry.WriteJSONError(w, "context", http.StatusInternalServerError, fmt.Sprintf("Failed to save vocabulary: %v", err))
+		c.Error(NewContextError(http.StatusInternalServerError, "Failed to save vocabulary"))
 		vocabSpan.SetStatus(codes.Error, "Failed to save vocabulary")
 		vocabSpan.RecordError(err)
 		vocabSpan.End()
 		span.SetStatus(codes.Error, "Failed to save vocabulary")
-		span.SetAttributes(attribute.Int("http.status_code", http.StatusInternalServerError))
 		return
 	}
 	vocabSpan.SetAttributes(attribute.Int("new_vocabulary_count", len(newVocabulary)))
@@ -124,18 +107,17 @@ func handleInput(w http.ResponseWriter, r *http.Request) {
 	subphraseSpan.SetAttributes(attribute.Int("subphrases_count", len(input.Subphrases)))
 	newSubphrases, err := saveSubphrasesToStore(input.Subphrases)
 	if err != nil {
-		telemetry.WriteJSONError(w, "context", http.StatusInternalServerError, fmt.Sprintf("Failed to save subphrases: %v", err))
+		c.Error(NewContextError(http.StatusInternalServerError, "Failed to save subphrases"))
 		subphraseSpan.SetStatus(codes.Error, "Failed to save subphrases")
 		subphraseSpan.RecordError(err)
 		subphraseSpan.End()
 		span.SetStatus(codes.Error, "Failed to save subphrases")
-		span.SetAttributes(attribute.Int("http.status_code", http.StatusInternalServerError))
 		return
 	}
 	subphraseSpan.SetAttributes(attribute.Int("new_subphrases_count", len(newSubphrases)))
 	subphraseSpan.End()
 
-	response := map[string]interface{}{
+	response := gin.H{
 		"newVocabulary": newVocabulary,
 		"newSubphrases": newSubphrases,
 		"version":       versionCounter,
@@ -150,34 +132,20 @@ func handleInput(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Sending response to ingestor: %v", response)
 	log.Println("Flushing logs to ensure visibility")
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	span.SetAttributes(attribute.Int("http.status_code", http.StatusOK))
-	json.NewEncoder(w).Encode(response)
+	c.JSON(http.StatusOK, response)
 }
 
-func handleHealth(w http.ResponseWriter, r *http.Request) {
-	// Extract trace context from incoming request
-	ctx := r.Context()
-	propagator := otel.GetTextMapPropagator()
-	ctx = propagator.Extract(ctx, propagation.HeaderCarrier(r.Header))
-
-	// Create a span for the health check
+func ginHandleHealth(c *gin.Context) {
+	// Get the tracer from the context
 	tracer := otel.Tracer("context-service")
-	ctx, span := tracer.Start(ctx, "healthCheck")
+	ctx, span := tracer.Start(c.Request.Context(), "healthCheck")
 	defer span.End()
 
-	log.Println("Health check endpoint called")
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusOK)
-	span.SetAttributes(attribute.Int("http.status_code", http.StatusOK))
+	// Create a new context with the span
+	c.Request = c.Request.WithContext(ctx)
 
-	_, err := w.Write([]byte("OK"))
-	if err != nil {
-		log.Printf("Error writing health check response: %v", err)
-		span.SetStatus(codes.Error, "Error writing response")
-		span.RecordError(err)
-	}
+	log.Println("Health check endpoint called")
+	c.String(http.StatusOK, "OK")
 }
 
 func main() {
@@ -207,14 +175,19 @@ func main() {
 
 	initStore()
 
-	// Register HTTP handlers
-	http.HandleFunc("/input", handleInput)
-	http.HandleFunc("/health", handleHealth)
+	// Create a new Gin router
+	router := gin.New()
 
-	log.Printf("Context service starting on %s:%s...\n", host, port)
-	if err := http.ListenAndServe(host+":"+port, nil); err != nil {
+	// Apply our unified middleware
+	middleware.SetupGlobalMiddleware(router, "context-service")
+
+	// Register Gin routes
+	router.POST("/input", ginHandleInput)
+	router.GET("/health", ginHandleHealth)
+
+	addr := host + ":" + port
+	log.Printf("Context service starting on %s...\n", addr)
+	if err := router.Run(addr); err != nil {
 		log.Fatalf("Context service failed to start: %v", err)
 	}
-
-	log.Println("Context service is ready to accept requests")
 }

@@ -1,17 +1,12 @@
 FROM golang:1.24 AS builder
 WORKDIR /app
 
-# Copy the telemetry module
+# Copy all shared modules
 COPY ./telemetry ./telemetry
-
-# Copy the text module
 COPY ./text ./text
-
-# Copy the httpclient module
 COPY ./httpclient ./httpclient
-
-# Copy the config module
 COPY ./config ./config
+COPY ./middleware ./middleware
 
 # Copy the source code
 COPY ./ingestor/ ./ingestor/
@@ -24,10 +19,14 @@ RUN go mod edit -replace=crochet/text=../text
 RUN go mod edit -replace=crochet/telemetry=../telemetry
 RUN go mod edit -replace=crochet/httpclient=../httpclient
 RUN go mod edit -replace=crochet/config=../config
+RUN go mod edit -replace=crochet/middleware=../middleware
+
+# Get dependencies
 RUN go get crochet/text
 RUN go get crochet/telemetry
 RUN go get crochet/httpclient
 RUN go get crochet/config
+RUN go get crochet/middleware
 
 # Add dependencies needed for OpenTelemetry
 RUN go get go.opentelemetry.io/otel
@@ -39,6 +38,7 @@ RUN go get github.com/mitchellh/mapstructure
 
 # Add envconfig dependency
 RUN go get github.com/kelseyhightower/envconfig
+
 RUN go mod tidy
 
 # Build the application

@@ -10,12 +10,12 @@ import (
 
 	"crochet/config"
 	"crochet/httpclient"
+	"crochet/middleware"
 	"crochet/telemetry"
 	"crochet/text"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mitchellh/mapstructure"
-	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
 // For backwards compatibility - use the shared error type under the hood
@@ -277,16 +277,11 @@ func main() {
 		Client: httpClient,
 	}
 
-	// Replace gin.Default() with explicit configuration
+	// Create Gin router
 	router := gin.New()
 
-	// Add explicitly chosen middleware instead of using defaults
-	router.Use(gin.Recovery())
-	router.Use(gin.Logger())
-
-	// Add custom middleware - use the shared error handler
-	router.Use(telemetry.GinErrorHandler())
-	router.Use(otelgin.Middleware(cfg.ServiceName))
+	// Use the unified middleware setup instead of individual middleware
+	middleware.SetupGlobalMiddleware(router, cfg.ServiceName)
 
 	router.POST("/ingest", func(c *gin.Context) {
 		// Add the config to the request context

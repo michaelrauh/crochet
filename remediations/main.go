@@ -1,19 +1,19 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
+	"crochet/middleware"
 	"crochet/telemetry"
 
+	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -21,58 +21,39 @@ type RemediationRequest struct {
 	Pairs [][]string `json:"pairs"`
 }
 
-func okHandler(w http.ResponseWriter, r *http.Request) {
-	// Extract trace context from incoming request
-	ctx := r.Context()
-	propagator := otel.GetTextMapPropagator()
-	ctx = propagator.Extract(ctx, propagation.HeaderCarrier(r.Header))
-
-	// Create a span for this handler
-	tracer := otel.Tracer("remediations-service")
-	ctx, span := tracer.Start(ctx, "okHandler")
-	defer span.End()
-
-	// Set attributes for the HTTP request
-	span.SetAttributes(
-		attribute.String("http.method", r.Method),
-		attribute.String("http.url", r.URL.String()),
-	)
-
-	w.Header().Set("Content-Type", "application/json")
-	span.SetAttributes(attribute.Int("http.status_code", http.StatusOK))
-	json.NewEncoder(w).Encode(map[string]string{"status": "OK"})
+// NewRemediationsError creates a new error specific to the remediations service
+func NewRemediationsError(code int, message string) *telemetry.ServiceError {
+	return telemetry.NewServiceError("remediations", code, message)
 }
 
-func remediateHandler(w http.ResponseWriter, r *http.Request) {
-	// Extract trace context from incoming request
-	ctx := r.Context()
-	propagator := otel.GetTextMapPropagator()
-	ctx = propagator.Extract(ctx, propagation.HeaderCarrier(r.Header))
-
-	// Create a span for this handler
+// Convert standard HTTP handlers to Gin handlers
+func ginOkHandler(c *gin.Context) {
+	// Get the tracer from the context
 	tracer := otel.Tracer("remediations-service")
-	ctx, span := tracer.Start(ctx, "remediateHandler")
+	ctx, span := tracer.Start(c.Request.Context(), "okHandler")
 	defer span.End()
 
-	// Set attributes for the HTTP request
-	span.SetAttributes(
-		attribute.String("http.method", r.Method),
-		attribute.String("http.url", r.URL.String()),
-	)
+	// Create a new context with the span
+	c.Request = c.Request.WithContext(ctx)
 
-	if r.Method != http.MethodPost {
-		telemetry.WriteJSONError(w, "remediations", http.StatusMethodNotAllowed, "Method not allowed")
-		span.SetStatus(codes.Error, "Method not allowed")
-		span.SetAttributes(attribute.Int("http.status_code", http.StatusMethodNotAllowed))
-		return
-	}
+	// Set response
+	c.JSON(http.StatusOK, gin.H{"status": "OK"})
+}
+
+func ginRemediateHandler(c *gin.Context) {
+	// Get the tracer from the context
+	tracer := otel.Tracer("remediations-service")
+	ctx, span := tracer.Start(c.Request.Context(), "remediateHandler")
+	defer span.End()
+
+	// Create a new context with the span
+	c.Request = c.Request.WithContext(ctx)
 
 	var request RemediationRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	if err := c.ShouldBindJSON(&request); err != nil {
 		log.Printf("Error decoding request: %v", err)
-		telemetry.WriteJSONError(w, "remediations", http.StatusBadRequest, "Invalid JSON format")
+		c.Error(NewRemediationsError(http.StatusBadRequest, "Invalid JSON format"))
 		span.SetStatus(codes.Error, "Invalid JSON format")
-		span.SetAttributes(attribute.Int("http.status_code", http.StatusBadRequest))
 		span.RecordError(err)
 		return
 	}
@@ -101,18 +82,13 @@ func remediateHandler(w http.ResponseWriter, r *http.Request) {
 		"112233445566778899aabbccddeeff00",
 		"00ffeeddccbbaa99887766554433221",
 	}
-
 	processSpan.SetAttributes(attribute.Int("hashes_count", len(hashes)))
 	processSpan.End()
 
-	response := map[string]interface{}{
+	c.JSON(http.StatusOK, gin.H{
 		"status": "OK",
 		"hashes": hashes,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	span.SetAttributes(attribute.Int("http.status_code", http.StatusOK))
-	json.NewEncoder(w).Encode(response)
+	})
 }
 
 func main() {
@@ -138,13 +114,19 @@ func main() {
 	}
 	defer tp.ShutdownWithTimeout(5 * time.Second)
 
-	// Register HTTP handlers
-	http.HandleFunc("/", okHandler)
-	http.HandleFunc("/remediate", remediateHandler)
+	// Create a new Gin router
+	router := gin.New()
+
+	// Apply our unified middleware
+	middleware.SetupGlobalMiddleware(router, "remediations-service")
+
+	// Register Gin routes
+	router.GET("/", ginOkHandler)
+	router.POST("/remediate", ginRemediateHandler)
 
 	addr := fmt.Sprintf("%s:%s", host, port)
-	log.Printf("Remediations service starting on %s:%s...", host, port)
-	if err := http.ListenAndServe(addr, nil); err != nil {
+	log.Printf("Remediations service starting on %s...", addr)
+	if err := router.Run(addr); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
 }

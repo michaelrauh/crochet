@@ -10,13 +10,15 @@ replace crochet/httpclient => ../httpclient
 
 replace crochet/config => ../config
 
+replace crochet/middleware => ../middleware
+
 require (
 	crochet/config v0.0.0-00010101000000-000000000000
 	crochet/httpclient v0.0.0-00010101000000-000000000000
-	crochet/telemetry v0.0.0-00010101000000-000000000000
+	crochet/middleware v0.0.0-00010101000000-000000000000
+	crochet/telemetry v0.0.0
 	crochet/text v0.0.0-00010101000000-000000000000
 	github.com/gin-gonic/gin v1.9.1
-	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/mitchellh/mapstructure v1.5.0
 	go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin v0.45.0
 )
@@ -37,6 +39,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.1 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/kelseyhightower/envconfig v1.4.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.4 // indirect
 	github.com/leodido/go-urn v1.2.4 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect

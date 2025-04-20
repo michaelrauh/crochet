@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,24 +11,24 @@ import (
 )
 
 type MockContextService struct {
-	SendMessageFunc func(message string) (map[string]interface{}, error)
+	SendMessageFunc func(ctx context.Context, message string) (map[string]interface{}, error)
 }
 
-func (m *MockContextService) SendMessage(message string) (map[string]interface{}, error) {
-	return m.SendMessageFunc(message)
+func (m *MockContextService) SendMessage(ctx context.Context, message string) (map[string]interface{}, error) {
+	return m.SendMessageFunc(ctx, message)
 }
 
 type MockRemediationsService struct {
-	FetchRemediationsFunc func(subphrases [][]string) (map[string]interface{}, error)
+	FetchRemediationsFunc func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error)
 }
 
-func (m *MockRemediationsService) FetchRemediations(subphrases [][]string) (map[string]interface{}, error) {
-	return m.FetchRemediationsFunc(subphrases)
+func (m *MockRemediationsService) FetchRemediations(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
+	return m.FetchRemediationsFunc(ctx, subphrases)
 }
 
 func TestHandleTextInputValidJSON(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(message string) (map[string]interface{}, error) {
+		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
 			return map[string]interface{}{
 				"version": 1,
 				"newSubphrases": []interface{}{
@@ -38,7 +39,7 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(subphrases [][]string) (map[string]interface{}, error) {
+		FetchRemediationsFunc: func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
 			return map[string]interface{}{
 				"status": "OK",
 				"hashes": []string{"1234567890abcdef1234567890abcdef"},
@@ -70,13 +71,13 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 
 func TestHandleTextInputInvalidJSON(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(message string) (map[string]interface{}, error) {
+		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
 			return nil, nil
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(subphrases [][]string) (map[string]interface{}, error) {
+		FetchRemediationsFunc: func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
 			return nil, nil
 		},
 	}
@@ -99,13 +100,13 @@ func TestHandleTextInputInvalidJSON(t *testing.T) {
 
 func TestHandleTextInputEmptyBody(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(message string) (map[string]interface{}, error) {
+		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
 			return nil, nil
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(subphrases [][]string) (map[string]interface{}, error) {
+		FetchRemediationsFunc: func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
 			return nil, nil
 		},
 	}
@@ -126,13 +127,13 @@ func TestHandleTextInputEmptyBody(t *testing.T) {
 
 func TestHandleTextInputWrongMethod(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(message string) (map[string]interface{}, error) {
+		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
 			return nil, nil
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(subphrases [][]string) (map[string]interface{}, error) {
+		FetchRemediationsFunc: func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
 			return nil, nil
 		},
 	}

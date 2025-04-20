@@ -1,4 +1,4 @@
-FROM golang:1.19 AS builder
+FROM golang:1.24 AS builder
 
 WORKDIR /app
 
@@ -12,27 +12,30 @@ RUN go mod tidy
 # Download dependencies
 RUN go mod download
 
+# Get Jaeger dependencies
+RUN go get github.com/opentracing/opentracing-go
+RUN go get github.com/opentracing/opentracing-go/ext
+RUN go get github.com/uber/jaeger-client-go
+RUN go get github.com/uber/jaeger-client-go/config
+
 # Install curl
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Copy the source code
-COPY ./context/ ./context/
+COPY ./context/ ./
 
-# Install necessary build tools for CGO
-RUN apt-get update && apt-get install -y gcc libc6-dev
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -o main ./main.go
 
-# Build the application with CGO enabled
-RUN CGO_ENABLED=1 go build -o main ./context/main.go
-
-FROM debian:bullseye-slim
+FROM alpine:latest
 
 WORKDIR /app
 
 # Copy the built binary from the builder stage
 COPY --from=builder /app/context/main ./main
 
-# Install runtime dependencies for SQLite and curl
-RUN apt-get update && apt-get install -y libsqlite3-0 curl && rm -rf /var/lib/apt/lists/*
+# Install curl for healthcheck
+RUN apk --no-cache add curl
 
 # Expose the port
 EXPOSE 8081

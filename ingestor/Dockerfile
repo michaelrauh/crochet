@@ -2,27 +2,26 @@ FROM golang:1.24 AS builder
 
 WORKDIR /app
 
-# Copy the ingestor go.mod file
-COPY ./ingestor/go.mod ./ingestor/
-
 # Copy the text module
 COPY ./text ./text
-
-# Generate go.sum during the build process
-WORKDIR /app/ingestor
-RUN go mod tidy
-
-# Explicitly add the crochet/text module as a dependency
-RUN go get crochet/text
-
-# Download dependencies
-RUN go mod download
 
 # Copy the source code
 COPY ./ingestor/ ./ingestor/
 
+# Set up the build environment
+WORKDIR /app/ingestor
+
+# Update the go.mod file with the required dependencies
+RUN go mod edit -replace=crochet/text=../text
+RUN go get crochet/text
+RUN go get github.com/opentracing/opentracing-go
+RUN go get github.com/opentracing/opentracing-go/ext
+RUN go get github.com/uber/jaeger-client-go
+RUN go get github.com/uber/jaeger-client-go/config
+RUN go mod tidy
+
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -v -o server ./ingestor/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -v -o server ./main.go
 
 FROM alpine:latest
 

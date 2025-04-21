@@ -40,9 +40,10 @@ services:
       retries: 5
       start_period: 30s
     environment:
+      - CONTEXT_SERVICE_NAME=context
       - CONTEXT_PORT=8081
       - CONTEXT_HOST=0.0.0.0
-      - JAEGER_ENDPOINT=jaeger:4317
+      - CONTEXT_JAEGER_ENDPOINT=jaeger:4317
     logging:
       driver: "json-file"
       options:
@@ -60,9 +61,10 @@ services:
     depends_on:
       - jaeger
     environment:
+      - REMEDIATIONS_SERVICE_NAME=remediations
       - REMEDIATIONS_PORT=8082
       - REMEDIATIONS_HOST=0.0.0.0
-      - JAEGER_ENDPOINT=jaeger:4317
+      - REMEDIATIONS_JAEGER_ENDPOINT=jaeger:4317
     logging:
       driver: "json-file"
       options:

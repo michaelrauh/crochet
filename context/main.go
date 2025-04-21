@@ -3,10 +3,10 @@ package main
 import (
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
+	"crochet/config"
 	"crochet/middleware"
 	"crochet/telemetry"
 
@@ -151,43 +151,32 @@ func ginHandleHealth(c *gin.Context) {
 func main() {
 	log.Println("Starting context service...")
 
-	port := os.Getenv("CONTEXT_PORT")
-	if port == "" {
-		panic("CONTEXT_PORT environment variable is not set")
-	}
-
-	host := os.Getenv("CONTEXT_HOST")
-	if host == "" {
-		panic("CONTEXT_HOST environment variable is not set")
-	}
-
-	jaegerEndpoint := os.Getenv("JAEGER_ENDPOINT")
-	if jaegerEndpoint == "" {
-		panic("JAEGER_ENDPOINT environment variable must be set")
-	}
-
-	// Initialize OpenTelemetry with the shared telemetry package
-	tp, err := telemetry.InitTracer("context-service", jaegerEndpoint)
+	// Load configuration using the unified config package
+	cfg, err := config.LoadContextConfig()
 	if err != nil {
-		log.Fatalf("Failed to initialize OpenTelemetry: %v", err)
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	// Log configuration details
+	log.Printf("Using unified configuration management: %+v", cfg)
+	config.LogConfig(cfg.BaseConfig)
+
+	// Set up common components using the shared helper
+	router, tp, err := middleware.SetupCommonComponents(cfg.ServiceName, cfg.JaegerEndpoint)
+	if err != nil {
+		log.Fatalf("Failed to set up application: %v", err)
 	}
 	defer tp.ShutdownWithTimeout(5 * time.Second)
 
 	initStore()
 
-	// Create a new Gin router
-	router := gin.New()
-
-	// Apply our unified middleware
-	middleware.SetupGlobalMiddleware(router, "context-service")
-
 	// Register Gin routes
 	router.POST("/input", ginHandleInput)
 	router.GET("/health", ginHandleHealth)
 
-	addr := host + ":" + port
-	log.Printf("Context service starting on %s...\n", addr)
-	if err := router.Run(addr); err != nil {
+	address := cfg.GetAddress()
+	log.Printf("Context service starting on %s...\n", address)
+	if err := router.Run(address); err != nil {
 		log.Fatalf("Context service failed to start: %v", err)
 	}
 }

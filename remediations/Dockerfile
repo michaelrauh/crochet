@@ -2,9 +2,10 @@
 FROM golang:1.24-alpine AS builder
 WORKDIR /app
 
-# Copy the telemetry and middleware modules first
+# Copy the telemetry, middleware and config modules first
 COPY telemetry/ ./telemetry/
 COPY middleware/ ./middleware/
+COPY config/ ./config/
 
 # Download gin dependency for telemetry module first
 WORKDIR /app/telemetry
@@ -22,12 +23,14 @@ RUN apk add --no-cache gcc musl-dev
 # Set up module replacements
 RUN go mod edit -replace=crochet/telemetry=./telemetry
 RUN go mod edit -replace=crochet/middleware=./middleware
+RUN go mod edit -replace=crochet/config=./config
 
 # Get dependencies
 RUN go get go.opentelemetry.io/otel
 RUN go get go.opentelemetry.io/otel/trace
 RUN go get crochet/telemetry
 RUN go get crochet/middleware
+RUN go get crochet/config
 RUN go mod tidy
 
 # Build the application

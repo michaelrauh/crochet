@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
+	"crochet/config"
 	"crochet/middleware"
 	"crochet/telemetry"
 
@@ -92,41 +92,30 @@ func ginRemediateHandler(c *gin.Context) {
 }
 
 func main() {
-	port := os.Getenv("REMEDIATIONS_PORT")
-	if port == "" {
-		panic("REMEDIATIONS_PORT environment variable must be set")
-	}
-
-	host := os.Getenv("REMEDIATIONS_HOST")
-	if host == "" {
-		panic("REMEDIATIONS_HOST environment variable must be set")
-	}
-
-	jaegerEndpoint := os.Getenv("JAEGER_ENDPOINT")
-	if jaegerEndpoint == "" {
-		panic("JAEGER_ENDPOINT environment variable must be set")
-	}
-
-	// Initialize OpenTelemetry with the shared telemetry package
-	tp, err := telemetry.InitTracer("remediations-service", jaegerEndpoint)
+	// Load configuration using the unified config package
+	cfg, err := config.LoadRemediationsConfig()
 	if err != nil {
-		log.Fatalf("Failed to initialize OpenTelemetry: %v", err)
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	// Log configuration details
+	log.Printf("Using unified configuration management: %+v", cfg)
+	config.LogConfig(cfg.BaseConfig)
+
+	// Set up common components using the shared helper
+	router, tp, err := middleware.SetupCommonComponents(cfg.ServiceName, cfg.JaegerEndpoint)
+	if err != nil {
+		log.Fatalf("Failed to set up application: %v", err)
 	}
 	defer tp.ShutdownWithTimeout(5 * time.Second)
-
-	// Create a new Gin router
-	router := gin.New()
-
-	// Apply our unified middleware
-	middleware.SetupGlobalMiddleware(router, "remediations-service")
 
 	// Register Gin routes
 	router.GET("/", ginOkHandler)
 	router.POST("/remediate", ginRemediateHandler)
 
-	addr := fmt.Sprintf("%s:%s", host, port)
-	log.Printf("Remediations service starting on %s...", addr)
-	if err := router.Run(addr); err != nil {
+	address := cfg.GetAddress()
+	log.Printf("Remediations service starting on %s...", address)
+	if err := router.Run(address); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
 }

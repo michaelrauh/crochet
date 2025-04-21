@@ -62,29 +62,33 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 }
 
 func main() {
+	// Load configuration
 	cfg, err := config.LoadIngestorConfig()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	log.Printf("[SHARED CONFIG] Using unified configuration management: %+v", cfg)
-	config.LogConfig(cfg)
+	// Log configuration details
+	log.Printf("Using unified configuration management: %+v", cfg)
+	config.LogConfig(cfg.BaseConfig)
 
-	tp, err := telemetry.InitTracer(cfg.ServiceName, cfg.JaegerEndpoint)
+	// Set up common components using the shared helper
+	router, tp, err := middleware.SetupCommonComponents(cfg.ServiceName, cfg.JaegerEndpoint)
 	if err != nil {
-		log.Fatalf("Failed to initialize OpenTelemetry: %v", err)
+		log.Fatalf("Failed to set up application: %v", err)
 	}
 	defer tp.ShutdownWithTimeout(5 * time.Second)
 
+	// Set up HTTP client (specific to ingestor service)
 	httpClientOptions := httpclient.ClientOptions{
 		DialTimeout:   cfg.DialTimeout,
 		DialKeepAlive: cfg.DialKeepAlive,
 		MaxIdleConns:  cfg.MaxIdleConns,
 		ClientTimeout: cfg.ClientTimeout,
 	}
-
 	httpClient := httpclient.NewClient(httpClientOptions)
 
+	// Initialize services (specific to ingestor service)
 	contextService := &types.RealContextService{
 		URL:    cfg.ContextServiceURL,
 		Client: httpClient,
@@ -94,16 +98,14 @@ func main() {
 		Client: httpClient,
 	}
 
-	router := gin.New()
-
-	middleware.SetupGlobalMiddleware(router, cfg.ServiceName)
-
+	// Register routes
 	router.POST("/ingest", func(c *gin.Context) {
 		ctxWithConfig := context.WithValue(c.Request.Context(), "config", cfg)
 		c.Request = c.Request.WithContext(ctxWithConfig)
 		ginHandleTextInput(c, contextService, remediationsService)
 	})
 
+	// Start the server
 	address := cfg.GetAddress()
 	log.Printf("Server starting on %s...\n", address)
 	if err := router.Run(address); err != nil {

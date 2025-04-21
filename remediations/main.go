@@ -51,8 +51,7 @@ func ginRemediateHandler(c *gin.Context) {
 
 	var request RemediationRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		log.Printf("Error decoding request: %v", err)
-		c.Error(NewRemediationsError(http.StatusBadRequest, "Invalid JSON format"))
+		telemetry.LogAndError(c, err, "remediations", "Invalid JSON format")
 		span.SetStatus(codes.Error, "Invalid JSON format")
 		span.RecordError(err)
 		return
@@ -82,6 +81,7 @@ func ginRemediateHandler(c *gin.Context) {
 		"112233445566778899aabbccddeeff00",
 		"00ffeeddccbbaa99887766554433221",
 	}
+
 	processSpan.SetAttributes(attribute.Int("hashes_count", len(hashes)))
 	processSpan.End()
 

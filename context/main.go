@@ -81,7 +81,7 @@ func ginHandleInput(c *gin.Context) {
 
 	var input Input
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.Error(NewContextError(http.StatusBadRequest, "Invalid JSON format"))
+		telemetry.LogAndError(c, err, "context", "Invalid JSON format")
 		span.SetStatus(codes.Error, "Invalid JSON format")
 		span.RecordError(err)
 		return
@@ -92,7 +92,7 @@ func ginHandleInput(c *gin.Context) {
 	vocabSpan.SetAttributes(attribute.Int("vocabulary_count", len(input.Vocabulary)))
 	newVocabulary, err := saveVocabularyToStore(input.Vocabulary)
 	if err != nil {
-		c.Error(NewContextError(http.StatusInternalServerError, "Failed to save vocabulary"))
+		telemetry.LogAndError(c, err, "context", "Failed to save vocabulary")
 		vocabSpan.SetStatus(codes.Error, "Failed to save vocabulary")
 		vocabSpan.RecordError(err)
 		vocabSpan.End()
@@ -107,7 +107,7 @@ func ginHandleInput(c *gin.Context) {
 	subphraseSpan.SetAttributes(attribute.Int("subphrases_count", len(input.Subphrases)))
 	newSubphrases, err := saveSubphrasesToStore(input.Subphrases)
 	if err != nil {
-		c.Error(NewContextError(http.StatusInternalServerError, "Failed to save subphrases"))
+		telemetry.LogAndError(c, err, "context", "Failed to save subphrases")
 		subphraseSpan.SetStatus(codes.Error, "Failed to save subphrases")
 		subphraseSpan.RecordError(err)
 		subphraseSpan.End()

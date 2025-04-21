@@ -5,8 +5,15 @@ WORKDIR /app
 COPY ./telemetry/ ./telemetry/
 COPY ./middleware/ ./middleware/
 
+# Download gin dependency for telemetry module first
+WORKDIR /app/telemetry
+RUN go mod download github.com/gin-gonic/gin
+RUN go mod tidy
+
 # Copy the context go.mod file
+WORKDIR /app
 COPY ./context/go.mod ./context/
+COPY ./context/main.go ./context/
 
 # Generate go.sum during the build process
 WORKDIR /app/context
@@ -26,9 +33,6 @@ RUN go get github.com/gin-gonic/gin
 
 # Install curl
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
-# Copy the source code
-COPY ./context/ ./
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -o main ./main.go

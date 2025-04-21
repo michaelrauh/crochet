@@ -1,0 +1,15 @@
+go 1.24.2
+
+use (
+	.
+	./config
+	./context
+	./health
+	./httpclient
+	./ingestor
+	./middleware
+	./remediations
+	./telemetry
+	./text
+	./types
+)

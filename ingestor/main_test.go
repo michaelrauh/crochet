@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"crochet/telemetry"
+	"crochet/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -65,7 +66,7 @@ func (m *MockRemediationsService) FetchRemediations(ctx context.Context, subphra
 }
 
 // setupGinRouter creates a test Gin router with the specified handlers
-func setupGinRouter(contextService ContextService, remediationsService RemediationsService) *gin.Engine {
+func setupGinRouter(contextService types.ContextService, remediationsService types.RemediationsService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New() // Use New instead of Default to avoid default middleware
 	r.Use(gin.Recovery())
@@ -257,7 +258,7 @@ func TestErrorHandlerMiddleware(t *testing.T) {
 	mockContextService := &MockContextService{
 		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
 			// Return our custom error directly - this simulates what will happen in the real service
-			return nil, NewIngestorError(http.StatusBadGateway, "Test middleware error")
+			return nil, telemetry.NewServiceError("ingestor", http.StatusBadGateway, "Test middleware error")
 		},
 	}
 

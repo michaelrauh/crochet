@@ -6,7 +6,13 @@ WORKDIR /app
 COPY telemetry/ ./telemetry/
 COPY middleware/ ./middleware/
 
+# Download gin dependency for telemetry module first
+WORKDIR /app/telemetry
+RUN go mod download github.com/gin-gonic/gin
+RUN go mod tidy
+
 # Copy remediations module files
+WORKDIR /app
 COPY remediations/go.mod .
 COPY remediations/main.go .
 

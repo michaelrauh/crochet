@@ -3,8 +3,10 @@ package telemetry
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
+	// Gin framework for HTTP handling
 	"github.com/gin-gonic/gin"
 )
 
@@ -27,6 +29,30 @@ func NewServiceError(service string, code int, message string) *ServiceError {
 		Code:    code,
 		Message: message,
 	}
+}
+
+// LogAndError logs an error and adds it to the Gin context
+// It returns true if there was an error, making it convenient for early returns
+func LogAndError(c *gin.Context, err error, serviceName string, message string) bool {
+	if err == nil {
+		return false
+	}
+
+	// Log the error
+	if message != "" {
+		log.Printf("%s: %v", message, err)
+	} else {
+		log.Printf("%v", err)
+	}
+
+	// If it's already a ServiceError, use it directly; otherwise, wrap it
+	if serviceErr, ok := err.(*ServiceError); ok {
+		c.Error(serviceErr)
+	} else {
+		c.Error(NewServiceError(serviceName, http.StatusInternalServerError, message))
+	}
+
+	return true
 }
 
 // ErrorHandler is a middleware for Gin that handles custom errors

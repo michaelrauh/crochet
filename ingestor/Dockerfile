@@ -7,9 +7,17 @@ COPY ./text ./text
 COPY ./httpclient ./httpclient
 COPY ./config ./config
 COPY ./middleware ./middleware
+COPY ./types ./types
 
-# Copy the source code
-COPY ./ingestor/ ./ingestor/
+# Download gin dependency for telemetry module first
+WORKDIR /app/telemetry
+RUN go mod download github.com/gin-gonic/gin
+RUN go mod tidy
+
+# Copy the ingestor source code
+WORKDIR /app
+COPY ./ingestor/go.mod ./ingestor/
+COPY ./ingestor/main.go ./ingestor/
 
 # Set up the build environment
 WORKDIR /app/ingestor
@@ -20,6 +28,7 @@ RUN go mod edit -replace=crochet/telemetry=../telemetry
 RUN go mod edit -replace=crochet/httpclient=../httpclient
 RUN go mod edit -replace=crochet/config=../config
 RUN go mod edit -replace=crochet/middleware=../middleware
+RUN go mod edit -replace=crochet/types=../types
 
 # Get dependencies
 RUN go get crochet/text
@@ -27,6 +36,7 @@ RUN go get crochet/telemetry
 RUN go get crochet/httpclient
 RUN go get crochet/config
 RUN go get crochet/middleware
+RUN go get crochet/types
 
 # Add dependencies needed for OpenTelemetry
 RUN go get go.opentelemetry.io/otel
@@ -38,7 +48,6 @@ RUN go get github.com/mitchellh/mapstructure
 
 # Add envconfig dependency
 RUN go get github.com/kelseyhightower/envconfig
-
 RUN go mod tidy
 
 # Build the application

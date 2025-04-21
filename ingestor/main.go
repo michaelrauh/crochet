@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"crochet/clients"
 	"crochet/config"
 	"crochet/httpclient"
 	"crochet/middleware"
@@ -28,36 +29,34 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 	subphrases := text.GenerateSubphrases(corpus.Text)
 	vocabulary := text.Vocabulary(corpus.Text)
 
-	contextInputJSON, err := types.PrepareContextServiceInput(corpus, vocabulary, subphrases)
-	if telemetry.LogAndError(c, err, "ingestor", "Error preparing data for context service") {
-		return
+	// Create input for context service
+	contextInput := types.ContextInput{
+		Title:      corpus.Title,
+		Vocabulary: vocabulary,
+		Subphrases: subphrases,
 	}
 
-	ctx := c.Request.Context()
-	contextResponseRaw, err := contextService.SendMessage(ctx, string(contextInputJSON))
+	// Send to context service
+	contextResponse, err := contextService.SendMessage(contextInput)
 	if telemetry.LogAndError(c, err, "ingestor", "Error sending message to context service") {
 		return
 	}
 
-	contextResponse, err := types.ProcessContextResponse(contextResponseRaw)
-	if telemetry.LogAndError(c, err, "ingestor", "Invalid response from context service") {
-		return
+	// Extract pairs for remediations
+	remediationReq := types.RemediationRequest{
+		Pairs: types.ExtractPairsFromSubphrases(contextResponse.NewSubphrases),
 	}
 
-	subphrasesForRemediations := types.ExtractPairsFromSubphrases(contextResponse.NewSubphrases)
-	remediationsResponseRaw, err := remediationsService.FetchRemediations(ctx, subphrasesForRemediations)
+	// Send to remediations service
+	remediationResp, err := remediationsService.FetchRemediations(remediationReq)
 	if telemetry.LogAndError(c, err, "ingestor", "Error fetching remediations") {
-		return
-	}
-
-	_, err = types.ProcessRemediationsResponse(remediationsResponseRaw)
-	if telemetry.LogAndError(c, err, "ingestor", "Error processing remediations response") {
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"version": contextResponse.Version,
+		"hashes":  remediationResp.Hashes,
 	})
 }
 
@@ -88,15 +87,9 @@ func main() {
 	}
 	httpClient := httpclient.NewClient(httpClientOptions)
 
-	// Initialize services (specific to ingestor service)
-	contextService := &types.RealContextService{
-		URL:    cfg.ContextServiceURL,
-		Client: httpClient,
-	}
-	remediationsService := &types.RealRemediationsService{
-		URL:    cfg.RemediationsServiceURL,
-		Client: httpClient,
-	}
+	// Initialize services using the new clients package
+	contextService := clients.NewContextService(cfg.ContextServiceURL, httpClient)
+	remediationsService := clients.NewRemediationsService(cfg.RemediationsServiceURL, httpClient)
 
 	// Register routes
 	router.POST("/ingest", func(c *gin.Context) {

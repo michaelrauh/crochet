@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -39,30 +38,29 @@ func teardownTestEnvironment() {
 func TestMain(m *testing.M) {
 	// Setup test environment
 	setupTestEnvironment()
-
 	// Run tests
 	code := m.Run()
-
 	// Cleanup
 	teardownTestEnvironment()
-
 	os.Exit(code)
 }
 
+// MockContextService implements the updated ContextService interface
 type MockContextService struct {
-	SendMessageFunc func(ctx context.Context, message string) (map[string]interface{}, error)
+	SendMessageFunc func(input types.ContextInput) (types.ContextResponse, error)
 }
 
-func (m *MockContextService) SendMessage(ctx context.Context, message string) (map[string]interface{}, error) {
-	return m.SendMessageFunc(ctx, message)
+func (m *MockContextService) SendMessage(input types.ContextInput) (types.ContextResponse, error) {
+	return m.SendMessageFunc(input)
 }
 
+// MockRemediationsService implements the updated RemediationsService interface
 type MockRemediationsService struct {
-	FetchRemediationsFunc func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error)
+	FetchRemediationsFunc func(request types.RemediationRequest) (types.RemediationResponse, error)
 }
 
-func (m *MockRemediationsService) FetchRemediations(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
-	return m.FetchRemediationsFunc(ctx, subphrases)
+func (m *MockRemediationsService) FetchRemediations(request types.RemediationRequest) (types.RemediationResponse, error) {
+	return m.FetchRemediationsFunc(request)
 }
 
 // setupGinRouter creates a test Gin router with the specified handlers
@@ -71,7 +69,6 @@ func setupGinRouter(contextService types.ContextService, remediationsService typ
 	r := gin.New() // Use New instead of Default to avoid default middleware
 	r.Use(gin.Recovery())
 	r.Use(telemetry.GinErrorHandler()) // Use the shared error handler middleware
-
 	r.POST("/ingest", func(c *gin.Context) {
 		ginHandleTextInput(c, contextService, remediationsService)
 	})
@@ -80,31 +77,29 @@ func setupGinRouter(contextService types.ContextService, remediationsService typ
 
 func TestHandleTextInputValidJSON(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
-			return map[string]interface{}{
-				"version": 1,
-				"newSubphrases": []interface{}{
-					[]interface{}{"test", "content"},
+		SendMessageFunc: func(input types.ContextInput) (types.ContextResponse, error) {
+			return types.ContextResponse{
+				Version: 1,
+				NewSubphrases: [][]string{
+					{"test", "content"},
 				},
 			}, nil
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
-			return map[string]interface{}{
-				"status": "OK",
-				"hashes": []string{"1234567890abcdef1234567890abcdef"},
+		FetchRemediationsFunc: func(request types.RemediationRequest) (types.RemediationResponse, error) {
+			return types.RemediationResponse{
+				Status: "OK",
+				Hashes: []string{"1234567890abcdef1234567890abcdef"},
 			}, nil
 		},
 	}
 
 	router := setupGinRouter(mockContextService, mockRemediationsService)
-
 	body := `{"title": "Test Title", "text": "Test Content"}`
 	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -124,23 +119,21 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 
 func TestHandleTextInputInvalidJSON(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
-			return nil, nil
+		SendMessageFunc: func(input types.ContextInput) (types.ContextResponse, error) {
+			return types.ContextResponse{}, nil
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
-			return nil, nil
+		FetchRemediationsFunc: func(request types.RemediationRequest) (types.RemediationResponse, error) {
+			return types.RemediationResponse{}, nil
 		},
 	}
 
 	router := setupGinRouter(mockContextService, mockRemediationsService)
-
 	invalidJSON := `{title:"Invalid JSON"}`
 	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(invalidJSON))
 	req.Header.Set("Content-Type", "application/json")
-
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -160,22 +153,20 @@ func TestHandleTextInputInvalidJSON(t *testing.T) {
 
 func TestHandleTextInputEmptyBody(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
-			return nil, nil
+		SendMessageFunc: func(input types.ContextInput) (types.ContextResponse, error) {
+			return types.ContextResponse{}, nil
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
-			return nil, nil
+		FetchRemediationsFunc: func(request types.RemediationRequest) (types.RemediationResponse, error) {
+			return types.RemediationResponse{}, nil
 		},
 	}
 
 	router := setupGinRouter(mockContextService, mockRemediationsService)
-
 	req, _ := http.NewRequest("POST", "/ingest", bytes.NewBufferString(""))
 	req.Header.Set("Content-Type", "application/json")
-
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -186,19 +177,18 @@ func TestHandleTextInputEmptyBody(t *testing.T) {
 
 func TestHandleTextInputWrongMethod(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
-			return nil, nil
+		SendMessageFunc: func(input types.ContextInput) (types.ContextResponse, error) {
+			return types.ContextResponse{}, nil
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
-			return nil, nil
+		FetchRemediationsFunc: func(request types.RemediationRequest) (types.RemediationResponse, error) {
+			return types.RemediationResponse{}, nil
 		},
 	}
 
 	router := setupGinRouter(mockContextService, mockRemediationsService)
-
 	req, _ := http.NewRequest("GET", "/ingest", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -210,31 +200,28 @@ func TestHandleTextInputWrongMethod(t *testing.T) {
 	}
 }
 
-// Add a new test specifically for the mapstructure functionality
 func TestHandleTextInputWithMissingFields(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
-			return map[string]interface{}{
-				"version": 1,
+		SendMessageFunc: func(input types.ContextInput) (types.ContextResponse, error) {
+			return types.ContextResponse{
+				Version: 1,
 			}, nil
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
-			return map[string]interface{}{
-				"status": "OK",
+		FetchRemediationsFunc: func(request types.RemediationRequest) (types.RemediationResponse, error) {
+			return types.RemediationResponse{
+				Status: "OK",
 			}, nil
 		},
 	}
 
 	router := setupGinRouter(mockContextService, mockRemediationsService)
-
 	// Missing the 'text' field
 	body := `{"title": "Test Title"}`
 	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -253,27 +240,24 @@ func TestHandleTextInputWithMissingFields(t *testing.T) {
 	}
 }
 
-// Add a new test for our error handling middleware
 func TestErrorHandlerMiddleware(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, message string) (map[string]interface{}, error) {
+		SendMessageFunc: func(input types.ContextInput) (types.ContextResponse, error) {
 			// Return our custom error directly - this simulates what will happen in the real service
-			return nil, telemetry.NewServiceError("ingestor", http.StatusBadGateway, "Test middleware error")
+			return types.ContextResponse{}, telemetry.NewServiceError("ingestor", http.StatusBadGateway, "Test middleware error")
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, subphrases [][]string) (map[string]interface{}, error) {
-			return nil, nil
+		FetchRemediationsFunc: func(request types.RemediationRequest) (types.RemediationResponse, error) {
+			return types.RemediationResponse{}, nil
 		},
 	}
 
 	router := setupGinRouter(mockContextService, mockRemediationsService)
-
 	body := `{"title": "Test Title", "text": "Test Content"}`
 	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 

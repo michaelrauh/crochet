@@ -8,6 +8,7 @@ COPY ./httpclient ./httpclient
 COPY ./config ./config
 COPY ./middleware ./middleware
 COPY ./types ./types
+COPY ./clients ./clients
 
 # Download gin dependency for telemetry module first
 WORKDIR /app/telemetry
@@ -29,6 +30,7 @@ RUN go mod edit -replace=crochet/httpclient=../httpclient
 RUN go mod edit -replace=crochet/config=../config
 RUN go mod edit -replace=crochet/middleware=../middleware
 RUN go mod edit -replace=crochet/types=../types
+RUN go mod edit -replace=crochet/clients=../clients
 
 # Get dependencies
 RUN go get crochet/text
@@ -37,6 +39,7 @@ RUN go get crochet/httpclient
 RUN go get crochet/config
 RUN go get crochet/middleware
 RUN go get crochet/types
+RUN go get crochet/clients
 
 # Add dependencies needed for OpenTelemetry
 RUN go get go.opentelemetry.io/otel

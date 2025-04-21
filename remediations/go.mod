@@ -3,13 +3,18 @@ module crochet/remediations
 go 1.24.2
 
 replace crochet/telemetry => ../telemetry
-
 replace crochet/middleware => ../middleware
+replace crochet/config => ../config
+replace crochet/types => ../types
 
 require (
+	crochet/config v0.0.0-00010101000000-000000000000
 	crochet/middleware v0.0.0-00010101000000-000000000000
 	crochet/telemetry v0.0.0
+	crochet/types v0.0.0-00010101000000-000000000000
 	github.com/gin-gonic/gin v1.10.0
+	github.com/kelseyhightower/envconfig v1.4.0
+	github.com/mitchellh/mapstructure v1.5.0
 	go.opentelemetry.io/otel v1.35.0
 	go.opentelemetry.io/otel/trace v1.35.0
 )

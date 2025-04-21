@@ -1,10 +1,12 @@
 FROM golang:1.24 AS builder
 WORKDIR /app
 
-# Copy the telemetry, middleware, and config modules first
+# Copy the telemetry, middleware, config, health, and types modules first
 COPY ./telemetry/ ./telemetry/
 COPY ./middleware/ ./middleware/
 COPY ./config/ ./config/
+COPY ./health/ ./health/
+COPY ./types/ ./types/
 
 # Download gin dependency for telemetry module first
 WORKDIR /app/telemetry
@@ -21,6 +23,8 @@ WORKDIR /app/context
 RUN go mod edit -replace=crochet/telemetry=../telemetry
 RUN go mod edit -replace=crochet/middleware=../middleware
 RUN go mod edit -replace=crochet/config=../config
+RUN go mod edit -replace=crochet/health=../health
+RUN go mod edit -replace=crochet/types=../types
 RUN go mod tidy
 
 # Download dependencies
@@ -32,6 +36,8 @@ RUN go get go.opentelemetry.io/otel/trace
 RUN go get crochet/telemetry
 RUN go get crochet/middleware
 RUN go get crochet/config
+RUN go get crochet/health
+RUN go get crochet/types
 RUN go get github.com/gin-gonic/gin
 
 # Install curl

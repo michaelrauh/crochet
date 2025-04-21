@@ -17,6 +17,13 @@ type ContextInput struct {
 type ContextResponse struct {
 	Version       int        `mapstructure:"version" json:"version"`
 	NewSubphrases [][]string `mapstructure:"newSubphrases" json:"newSubphrases"`
+	NewVocabulary []string   `mapstructure:"newVocabulary" json:"newVocabulary"`
+}
+
+// ContextMemoryStore represents the in-memory storage for the context service
+type ContextMemoryStore struct {
+	Vocabulary map[string]struct{}
+	Subphrases map[string]struct{}
 }
 
 // RemediationRequest represents the request data for the remediation service

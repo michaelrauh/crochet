@@ -18,9 +18,7 @@ type ContextServiceClient struct {
 }
 
 // SendMessage sends data to the context service and returns the response
-func (s *ContextServiceClient) SendMessage(input types.ContextInput) (types.ContextResponse, error) {
-	ctx := context.Background()
-
+func (s *ContextServiceClient) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
 	// Marshal to JSON for the HTTP request
 	requestJSON, err := json.Marshal(input)
 	if err != nil {
@@ -49,9 +47,7 @@ type RemediationsServiceClient struct {
 }
 
 // FetchRemediations sends request to the remediations service and returns the response
-func (s *RemediationsServiceClient) FetchRemediations(request types.RemediationRequest) (types.RemediationResponse, error) {
-	ctx := context.Background()
-
+func (s *RemediationsServiceClient) FetchRemediations(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
 	// Marshal to JSON for the HTTP request
 	requestJSON, err := json.Marshal(request)
 	if err != nil {
@@ -62,6 +58,8 @@ func (s *RemediationsServiceClient) FetchRemediations(request types.RemediationR
 	if serviceResp.Error != nil {
 		return types.RemediationResponse{}, fmt.Errorf("error calling remediations service: %w", serviceResp.Error)
 	}
+
+	log.Printf("Received remediations service raw response: %v", serviceResp.RawResponse)
 
 	var response types.RemediationResponse
 	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {

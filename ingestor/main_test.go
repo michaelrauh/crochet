@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -47,20 +48,20 @@ func TestMain(m *testing.M) {
 
 // MockContextService implements the updated ContextService interface
 type MockContextService struct {
-	SendMessageFunc func(input types.ContextInput) (types.ContextResponse, error)
+	SendMessageFunc func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error)
 }
 
-func (m *MockContextService) SendMessage(input types.ContextInput) (types.ContextResponse, error) {
-	return m.SendMessageFunc(input)
+func (m *MockContextService) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
+	return m.SendMessageFunc(ctx, input)
 }
 
 // MockRemediationsService implements the updated RemediationsService interface
 type MockRemediationsService struct {
-	FetchRemediationsFunc func(request types.RemediationRequest) (types.RemediationResponse, error)
+	FetchRemediationsFunc func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error)
 }
 
-func (m *MockRemediationsService) FetchRemediations(request types.RemediationRequest) (types.RemediationResponse, error) {
-	return m.FetchRemediationsFunc(request)
+func (m *MockRemediationsService) FetchRemediations(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
+	return m.FetchRemediationsFunc(ctx, request)
 }
 
 // setupGinRouter creates a test Gin router with the specified handlers
@@ -77,7 +78,7 @@ func setupGinRouter(contextService types.ContextService, remediationsService typ
 
 func TestHandleTextInputValidJSON(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(input types.ContextInput) (types.ContextResponse, error) {
+		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
 			return types.ContextResponse{
 				Version: 1,
 				NewSubphrases: [][]string{
@@ -88,7 +89,7 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(request types.RemediationRequest) (types.RemediationResponse, error) {
+		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
 			return types.RemediationResponse{
 				Status: "OK",
 				Hashes: []string{"1234567890abcdef1234567890abcdef"},
@@ -119,13 +120,13 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 
 func TestHandleTextInputInvalidJSON(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(input types.ContextInput) (types.ContextResponse, error) {
+		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
 			return types.ContextResponse{}, nil
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(request types.RemediationRequest) (types.RemediationResponse, error) {
+		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
 			return types.RemediationResponse{}, nil
 		},
 	}
@@ -153,13 +154,13 @@ func TestHandleTextInputInvalidJSON(t *testing.T) {
 
 func TestHandleTextInputEmptyBody(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(input types.ContextInput) (types.ContextResponse, error) {
+		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
 			return types.ContextResponse{}, nil
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(request types.RemediationRequest) (types.RemediationResponse, error) {
+		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
 			return types.RemediationResponse{}, nil
 		},
 	}
@@ -177,13 +178,13 @@ func TestHandleTextInputEmptyBody(t *testing.T) {
 
 func TestHandleTextInputWrongMethod(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(input types.ContextInput) (types.ContextResponse, error) {
+		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
 			return types.ContextResponse{}, nil
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(request types.RemediationRequest) (types.RemediationResponse, error) {
+		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
 			return types.RemediationResponse{}, nil
 		},
 	}
@@ -202,7 +203,7 @@ func TestHandleTextInputWrongMethod(t *testing.T) {
 
 func TestHandleTextInputWithMissingFields(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(input types.ContextInput) (types.ContextResponse, error) {
+		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
 			return types.ContextResponse{
 				Version: 1,
 			}, nil
@@ -210,7 +211,7 @@ func TestHandleTextInputWithMissingFields(t *testing.T) {
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(request types.RemediationRequest) (types.RemediationResponse, error) {
+		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
 			return types.RemediationResponse{
 				Status: "OK",
 			}, nil
@@ -242,14 +243,14 @@ func TestHandleTextInputWithMissingFields(t *testing.T) {
 
 func TestErrorHandlerMiddleware(t *testing.T) {
 	mockContextService := &MockContextService{
-		SendMessageFunc: func(input types.ContextInput) (types.ContextResponse, error) {
+		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
 			// Return our custom error directly - this simulates what will happen in the real service
 			return types.ContextResponse{}, telemetry.NewServiceError("ingestor", http.StatusBadGateway, "Test middleware error")
 		},
 	}
 
 	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(request types.RemediationRequest) (types.RemediationResponse, error) {
+		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
 			return types.RemediationResponse{}, nil
 		},
 	}

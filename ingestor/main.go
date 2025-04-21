@@ -36,8 +36,8 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 		Subphrases: subphrases,
 	}
 
-	// Send to context service
-	contextResponse, err := contextService.SendMessage(contextInput)
+	// Send to context service with request context to maintain trace
+	contextResponse, err := contextService.SendMessage(c.Request.Context(), contextInput)
 	if telemetry.LogAndError(c, err, "ingestor", "Error sending message to context service") {
 		return
 	}
@@ -47,8 +47,8 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 		Pairs: types.ExtractPairsFromSubphrases(contextResponse.NewSubphrases),
 	}
 
-	// Send to remediations service
-	remediationResp, err := remediationsService.FetchRemediations(remediationReq)
+	// Send to remediations service with request context to maintain trace
+	remediationResp, err := remediationsService.FetchRemediations(c.Request.Context(), remediationReq)
 	if telemetry.LogAndError(c, err, "ingestor", "Error fetching remediations") {
 		return
 	}

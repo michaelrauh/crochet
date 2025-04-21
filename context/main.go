@@ -67,12 +67,25 @@ func main() {
 	log.Printf("Using unified configuration management: %+v", cfg)
 	config.LogConfig(cfg.BaseConfig)
 
-	// Set up common components using the shared helper
-	router, tp, err := middleware.SetupCommonComponents(cfg.ServiceName, cfg.JaegerEndpoint)
+	// Set up common components using the updated shared helper with profiling
+	router, tp, mp, pp, err := middleware.SetupCommonComponents(
+		cfg.ServiceName,
+		cfg.JaegerEndpoint,
+		cfg.MetricsEndpoint,
+		cfg.PyroscopeEndpoint,
+	)
 	if err != nil {
 		log.Fatalf("Failed to set up application: %v", err)
 	}
+
+	// Ensure resources are properly cleaned up
 	defer tp.ShutdownWithTimeout(5 * time.Second)
+	if mp != nil {
+		defer mp.ShutdownWithTimeout(5 * time.Second)
+	}
+	if pp != nil {
+		defer pp.StopWithTimeout(5 * time.Second)
+	}
 
 	initStore()
 

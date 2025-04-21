@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 'Crochet Dashboards'
+    orgId: 1
+    folder: 'Crochet'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/crochet

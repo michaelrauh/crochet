@@ -31,7 +31,11 @@ type BaseConfig struct {
 	Port        string `envconfig:"PORT" required:"true"`
 
 	// OpenTelemetry configuration
-	JaegerEndpoint string `envconfig:"JAEGER_ENDPOINT" required:"true"`
+	JaegerEndpoint  string `envconfig:"JAEGER_ENDPOINT" required:"true"`
+	MetricsEndpoint string `envconfig:"METRICS_ENDPOINT" default:"otel-collector:4317"`
+
+	// Pyroscope configuration
+	PyroscopeEndpoint string `envconfig:"PYROSCOPE_ENDPOINT" default:"http://pyroscope:4040"`
 
 	// HTTP Client configuration
 	DialTimeout   time.Duration `envconfig:"DIAL_TIMEOUT" default:"10s"`

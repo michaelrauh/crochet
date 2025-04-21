@@ -11,6 +11,8 @@ COPY ./types/ ./types/
 # Download gin dependency for telemetry module first
 WORKDIR /app/telemetry
 RUN go mod download github.com/gin-gonic/gin
+# Add Grafana Pyroscope client dependency for telemetry
+RUN go mod download github.com/grafana/pyroscope-go
 RUN go mod tidy
 
 # Copy the context go.mod file
@@ -39,12 +41,13 @@ RUN go get crochet/config
 RUN go get crochet/health
 RUN go get crochet/types
 RUN go get github.com/gin-gonic/gin
+RUN go get github.com/grafana/pyroscope-go
 
 # Install curl
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o main ./main.go
+# Build the application with the production build tag
+RUN CGO_ENABLED=0 GOOS=linux go build -tags=prod -o main ./main.go
 
 FROM alpine:latest
 WORKDIR /app

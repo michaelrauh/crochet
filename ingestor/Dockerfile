@@ -13,6 +13,8 @@ COPY ./clients ./clients
 # Download gin dependency for telemetry module first
 WORKDIR /app/telemetry
 RUN go mod download github.com/gin-gonic/gin
+# Add Grafana Pyroscope client dependency for telemetry
+RUN go mod download github.com/grafana/pyroscope-go
 RUN go mod tidy
 
 # Copy the ingestor source code
@@ -46,6 +48,9 @@ RUN go get go.opentelemetry.io/otel
 RUN go get go.opentelemetry.io/otel/exporters/otlp/otlptrace
 RUN go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc
 
+# Add Grafana Pyroscope client dependency
+RUN go get github.com/grafana/pyroscope-go
+
 # Add mapstructure dependency
 RUN go get github.com/mitchellh/mapstructure
 
@@ -53,11 +58,12 @@ RUN go get github.com/mitchellh/mapstructure
 RUN go get github.com/kelseyhightower/envconfig
 RUN go mod tidy
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -v -o server ./main.go
+# Build the application with the production build tag
+RUN CGO_ENABLED=0 GOOS=linux go build -tags=prod -v -o server ./main.go
 
 FROM alpine:latest
-WORKDIR /app
-COPY --from=builder /app/ingestor/server ./server
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/ingestor/server .
 EXPOSE 8080
-CMD ["/app/server"]
+CMD ["./server"]

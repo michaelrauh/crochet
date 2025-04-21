@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"crochet/clients"
@@ -18,7 +19,27 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// ingestMutex ensures only one ingest operation runs at a time
+var ingestMutex sync.Mutex
+
+// contextKey is a custom type for context keys to avoid collisions
+type contextKey string
+
+// config key constant
+const configKey contextKey = "config"
+
 func ginHandleTextInput(c *gin.Context, contextService types.ContextService, remediationsService types.RemediationsService) {
+	// Try to acquire the mutex, return busy status if we can't
+	if !ingestMutex.TryLock() {
+		c.JSON(http.StatusLocked, gin.H{
+			"status":  "error",
+			"message": "Another ingest operation is in progress. Please try again later.",
+		})
+		return
+	}
+	// Ensure we release the mutex when done
+	defer ingestMutex.Unlock()
+
 	corpus, err := types.ProcessIncomingCorpus(c, "ingestor")
 	if telemetry.LogAndError(c, err, "ingestor", "Error processing incoming corpus") {
 		return
@@ -71,12 +92,25 @@ func main() {
 	log.Printf("Using unified configuration management: %+v", cfg)
 	config.LogConfig(cfg.BaseConfig)
 
-	// Set up common components using the shared helper
-	router, tp, err := middleware.SetupCommonComponents(cfg.ServiceName, cfg.JaegerEndpoint)
+	// Set up common components using the updated shared helper with profiling
+	router, tp, mp, pp, err := middleware.SetupCommonComponents(
+		cfg.ServiceName,
+		cfg.JaegerEndpoint,
+		cfg.MetricsEndpoint,
+		cfg.PyroscopeEndpoint,
+	)
 	if err != nil {
 		log.Fatalf("Failed to set up application: %v", err)
 	}
+
+	// Ensure resources are properly cleaned up
 	defer tp.ShutdownWithTimeout(5 * time.Second)
+	if mp != nil {
+		defer mp.ShutdownWithTimeout(5 * time.Second)
+	}
+	if pp != nil {
+		defer pp.StopWithTimeout(5 * time.Second)
+	}
 
 	// Set up HTTP client (specific to ingestor service)
 	httpClientOptions := httpclient.ClientOptions{
@@ -93,7 +127,7 @@ func main() {
 
 	// Register routes
 	router.POST("/ingest", func(c *gin.Context) {
-		ctxWithConfig := context.WithValue(c.Request.Context(), "config", cfg)
+		ctxWithConfig := context.WithValue(c.Request.Context(), configKey, cfg)
 		c.Request = c.Request.WithContext(ctxWithConfig)
 		ginHandleTextInput(c, contextService, remediationsService)
 	})

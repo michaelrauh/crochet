@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"crochet/telemetry"
 	"crochet/types"
@@ -275,5 +277,111 @@ func TestErrorHandlerMiddleware(t *testing.T) {
 	// Should include our error message
 	if response["error"] != "Test middleware error" {
 		t.Errorf("unexpected error message: got %v want %v", response["error"], "Test middleware error")
+	}
+}
+
+func TestConcurrentRequests(t *testing.T) {
+	// Reset the mutex state before the test
+	ingestMutex = sync.Mutex{}
+
+	// Create a channel to control the timing of our mock service
+	proceed := make(chan struct{})
+	completed := make(chan struct{})
+
+	mockContextService := &MockContextService{
+		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
+			// Signal when this function is called (first request acquired the lock)
+			select {
+			case <-proceed:
+				// Wait for the signal before proceeding - this simulates a long-running operation
+				// Then return a successful response
+				return types.ContextResponse{
+					Version: 1,
+					NewSubphrases: [][]string{
+						{"test", "content"},
+					},
+				}, nil
+			case <-time.After(5 * time.Second):
+				// Timeout to prevent test hanging indefinitely
+				t.Error("Test timed out waiting for proceed signal")
+				return types.ContextResponse{}, nil
+			}
+		},
+	}
+
+	mockRemediationsService := &MockRemediationsService{
+		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
+			return types.RemediationResponse{
+				Status: "OK",
+				Hashes: []string{"1234567890abcdef1234567890abcdef"},
+			}, nil
+		},
+	}
+
+	router := setupGinRouter(mockContextService, mockRemediationsService)
+
+	// Create the first request
+	body := `{"title": "Test Title", "text": "Test Content"}`
+	req1, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+
+	// Start the first request in a goroutine
+	go func() {
+		router.ServeHTTP(w1, req1)
+		close(completed)
+	}()
+
+	// Give the first request time to acquire the lock
+	time.Sleep(200 * time.Millisecond)
+
+	// Now try a second request while the first one is still processing
+	req2, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+
+	// Second request should get locked status immediately
+	if w2.Code != http.StatusLocked {
+		t.Errorf("concurrent request handler returned wrong status code: got %v want %v",
+			w2.Code, http.StatusLocked)
+	}
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(w2.Body).Decode(&response); err != nil {
+		t.Errorf("json.Unmarshal failed for concurrent response: %v", err)
+	}
+
+	if response["status"] != "error" {
+		t.Errorf("unexpected response status for concurrent request: got %v want %v",
+			response["status"], "error")
+	}
+
+	// Now allow the first request to complete
+	close(proceed)
+
+	// Wait for the first request to complete (with timeout)
+	select {
+	case <-completed:
+		// Request completed successfully
+	case <-time.After(5 * time.Second):
+		t.Fatal("Test timed out waiting for first request to complete")
+	}
+
+	// Verify the first request completed successfully
+	if w1.Code != http.StatusOK {
+		t.Errorf("first request handler returned wrong status code: got %v want %v",
+			w1.Code, http.StatusOK)
+	}
+
+	// After the first request completes, new requests should succeed
+	req3, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
+	req3.Header.Set("Content-Type", "application/json")
+	w3 := httptest.NewRecorder()
+	router.ServeHTTP(w3, req3)
+
+	if w3.Code != http.StatusOK {
+		t.Errorf("subsequent request handler returned wrong status code: got %v want %v",
+			w3.Code, http.StatusOK)
 	}
 }

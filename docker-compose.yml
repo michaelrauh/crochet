@@ -8,6 +8,8 @@ services:
     depends_on:
       - context
       - jaeger
+      - otel-collector
+      - pyroscope
     networks:
       - app-network
     environment:
@@ -16,6 +18,8 @@ services:
       - INGESTOR_PORT=8080
       - INGESTOR_REMEDIATIONS_SERVICE_URL=http://remediations:8082
       - INGESTOR_JAEGER_ENDPOINT=jaeger:4317
+      - INGESTOR_METRICS_ENDPOINT=otel-collector:4317
+      - INGESTOR_PYROSCOPE_ENDPOINT=http://pyroscope:4040
       - INGESTOR_HOST=0.0.0.0
     logging:
       driver: "json-file"
@@ -33,6 +37,8 @@ services:
       - app-network
     depends_on:
       - jaeger
+      - otel-collector
+      - pyroscope
     healthcheck:
       test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/health | grep -q 200 || (echo 'Health check failed' && exit 1)"]
       interval: 5s
@@ -44,6 +50,8 @@ services:
       - CONTEXT_PORT=8081
       - CONTEXT_HOST=0.0.0.0
       - CONTEXT_JAEGER_ENDPOINT=jaeger:4317
+      - CONTEXT_METRICS_ENDPOINT=otel-collector:4317
+      - CONTEXT_PYROSCOPE_ENDPOINT=http://pyroscope:4040
     logging:
       driver: "json-file"
       options:
@@ -60,11 +68,15 @@ services:
       - app-network
     depends_on:
       - jaeger
+      - otel-collector
+      - pyroscope
     environment:
       - REMEDIATIONS_SERVICE_NAME=remediations
       - REMEDIATIONS_PORT=8082
       - REMEDIATIONS_HOST=0.0.0.0
       - REMEDIATIONS_JAEGER_ENDPOINT=jaeger:4317
+      - REMEDIATIONS_METRICS_ENDPOINT=otel-collector:4317
+      - REMEDIATIONS_PYROSCOPE_ENDPOINT=http://pyroscope:4040
     logging:
       driver: "json-file"
       options:
@@ -87,6 +99,82 @@ services:
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     restart: always
+
+  # Add Pyroscope for continuous profiling
+  pyroscope:
+    image: pyroscope/pyroscope:latest
+    ports:
+      - "4040:4040"  # Pyroscope UI
+    networks:
+      - app-network
+    volumes:
+      - pyroscope-data:/var/lib/pyroscope
+    environment:
+      - PYROSCOPE_LOG_LEVEL=debug
+      - PYROSCOPE_RETENTION=24h  # Retain data for 24 hours for better visibility
+      - PYROSCOPE_STORAGE_PATH=/var/lib/pyroscope/data
+      - PYROSCOPE_BADGER_NO_TRUNCATE=true
+      - PYROSCOPE_MAX_NODES_SERIALIZATION=2048  # Increase max nodes for better flamegraph detail
+      - PYROSCOPE_MAX_NODENAME_LENGTH=4096  # Allow longer function names
+    restart: always
+    command:
+      - "server"
+      
+  # Add OpenTelemetry Collector
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector  # Added explicit container name
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    ports:
+      - "1888:1888"   # pprof extension
+      - "8888:8888"   # Prometheus metrics exposed by the collector
+      - "8889:8889"   # Prometheus exporter metrics
+      - "13133:13133" # health_check extension
+      - "4319:4317"   # OTLP gRPC receiver (changed from 4317 to avoid conflict)
+      - "4320:4318"   # OTLP http receiver (changed from 4318 to avoid conflict)
+      - "55679:55679" # zpages extension
+    networks:
+      - app-network
+    restart: always
+
+  # Add Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    networks:
+      - app-network
+    restart: always
+
+  # Add Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    networks:
+      - app-network
+    depends_on:
+      - prometheus
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_LOG_LEVEL=debug
+    restart: always
+
+volumes:
+  pyroscope-data:
 
 networks:
   app-network:

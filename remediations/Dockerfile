@@ -11,6 +11,8 @@ COPY types/ ./types/
 # Download gin dependency for telemetry module first
 WORKDIR /app/telemetry
 RUN go mod download github.com/gin-gonic/gin
+# Add Grafana Pyroscope client dependency for telemetry
+RUN go mod download github.com/grafana/pyroscope-go
 RUN go mod tidy
 
 # Copy remediations module files
@@ -34,12 +36,14 @@ RUN go get crochet/telemetry
 RUN go get crochet/middleware
 RUN go get crochet/config
 RUN go get crochet/types
+# Add Grafana Pyroscope client dependency
+RUN go get github.com/grafana/pyroscope-go
 RUN go get github.com/kelseyhightower/envconfig
 RUN go get github.com/mitchellh/mapstructure
 RUN go mod tidy
 
-# Build the application
-RUN go build -o remediations main.go
+# Build the application with the production build tag
+RUN go build -tags=prod -o remediations main.go
 
 FROM alpine:latest
 WORKDIR /root/

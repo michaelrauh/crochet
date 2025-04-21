@@ -1,47 +1,39 @@
 # Crochet Project Improvement Steps
 
-1. Fix traces
+1. Make ingestor process additions to pairs and vocabulary in order
+    - Don't allow a second call to ingest if a first one is still going.
 
-9. Add centralized metrics collection
-    - Integrate with OpenTelemetry metrics alongside the existing tracing
-    - Standardize metric names and collection methods across services
+2. Make Remediations return real data
+     - Add post 
+     - Hook in get 
 
-10. Add pyroscope to all services
-    - Integrate pyroscope in to all services
-    - ensure configuration is centralized and not duplicated across services
-
-11. Make Context process additions to pairs and vocabulary in order
-    - This can be slow and will only hold up ingestion
-    - Make ingestion process in order too. In fact, context may not need to be updated if ingestion is updated
-    - Aborting ingestion is OK but making it wait a little is better
-    - Version checks should still be fast
-
-12. Make Remediations thread safe
+3. Make Remediations thread safe
     - Write time consistency is not important, but read time consistency is very important
+    - if writes are queued and ongoing, wait for them to stop and block additional writes to the queue before reading and sending a response.
     - Do not worry about durability yet
 
-13. Create an orthos server
+4. Create an orthos server
     - It should have fast probabilistic checks and nonprobabalistic checks possible
 
-14. Have ingestor call orthos 
+5. Have ingestor call orthos with remediation IDs to get the orthos back. Consider streaming or chunking to reduce memory overhead.
 
-15. Make sure remediations have referential integrity to orthos
-    - If write to orthos fails, abort write to remediations 
-
-16. Create a work server 
+6. Create a work server 
    
-17. Work server should have queue semantics 
-    - Back it with rabbitMQ and forward (n)ack 
+7. Work server should have queue semantics 
 
-18. Have ingestor call the work server 
+8. Have ingestor call the work server 
     - Play remediations
     - Play an empty ortho 
 
-19. Implement the worker server 
+9. Implement the worker server 
     - Implement call pattern
     - Implement search logic 
+    - implement metrics - start with queue depth, ortho count by size, queue count by size, average time to process by size, likelihood that there are hits by size, time remaining estimate, total found per input, number of input corpora, uptime
 
-20. Make the services scalable 
+10. Make sure remediations have referential integrity to orthos
+    - If write to orthos fails, abort write to remediations 
+
+11. Make the services more scalable and durable
     - Make sure storage backends can scale 
     - Make state durable 
     - Move to K8s 

@@ -1,39 +1,35 @@
 # Crochet Project Improvement Steps
 
-1. Make ingestor process additions to pairs and vocabulary in order
-    - Don't allow a second call to ingest if a first one is still going.
-
-2. Make Remediations return real data
-     - Add post 
-     - Hook in get 
-
-3. Make Remediations thread safe
+1. Make Remediations thread safe
     - Write time consistency is not important, but read time consistency is very important
     - if writes are queued and ongoing, wait for them to stop and block additional writes to the queue before reading and sending a response.
     - Do not worry about durability yet
+    - write throughput should be high. Do not block on writes.
 
-4. Create an orthos server
+2. add version check endpoint to context
+
+3. Create an orthos server
     - It should have fast probabilistic checks and nonprobabalistic checks possible
 
-5. Have ingestor call orthos with remediation IDs to get the orthos back. Consider streaming or chunking to reduce memory overhead.
+4. Have ingestor call orthos with remediation IDs to get the orthos back. Consider streaming or chunking to reduce memory overhead.
 
-6. Create a work server 
+5. Create a work server 
    
-7. Work server should have queue semantics 
+6. Work server should have queue semantics 
 
-8. Have ingestor call the work server 
+7. Have ingestor call the work server 
     - Play remediations
     - Play an empty ortho 
 
-9. Implement the worker server 
+8. Implement the worker server 
     - Implement call pattern
     - Implement search logic 
-    - implement metrics - start with queue depth, ortho count by size, queue count by size, average time to process by size, likelihood that there are hits by size, time remaining estimate, total found per input, number of input corpora, uptime
+    - implement metrics - start with queue depth, ortho count by size, queue count by size, average time to process by size, likelihood that there are hits by size, time remaining estimate, total found per input, number of input corpora, uptime, number of remediations
 
-10. Make sure remediations have referential integrity to orthos
+9. Make sure remediations have referential integrity to orthos
     - If write to orthos fails, abort write to remediations 
 
-11. Make the services more scalable and durable
+10. Make the services more scalable and durable
     - Make sure storage backends can scale 
     - Make state durable 
     - Move to K8s 

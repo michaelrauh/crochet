@@ -36,3 +36,25 @@ type RemediationResponse struct {
 	Status string   `mapstructure:"status" json:"status"`
 	Hashes []string `mapstructure:"hashes" json:"hashes"`
 }
+
+// RemediationTuple represents a single remediation with a string pair and a hash
+type RemediationTuple struct {
+	Pair []string `mapstructure:"pair" json:"pair"`
+	Hash string   `mapstructure:"hash" json:"hash"`
+}
+
+// RemediationMemoryStore represents the in-memory storage for the remediation service
+type RemediationMemoryStore struct {
+	Remediations []RemediationTuple
+}
+
+// AddRemediationRequest represents the request to add new remediations
+type AddRemediationRequest struct {
+	Remediations []RemediationTuple `mapstructure:"remediations" json:"remediations"`
+}
+
+// AddRemediationResponse represents the response after adding remediations
+type AddRemediationResponse struct {
+	Status  string `mapstructure:"status" json:"status"`
+	Message string `mapstructure:"message" json:"message"`
+}

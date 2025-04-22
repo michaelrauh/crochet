@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 
 	"crochet/httpclient"
 	"crochet/types"
@@ -48,13 +49,20 @@ type RemediationsServiceClient struct {
 
 // FetchRemediations sends request to the remediations service and returns the response
 func (s *RemediationsServiceClient) FetchRemediations(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-	// Marshal to JSON for the HTTP request
-	requestJSON, err := json.Marshal(request)
+	// Marshal pairs to JSON
+	pairsJSON, err := json.Marshal(request.Pairs)
 	if err != nil {
-		return types.RemediationResponse{}, fmt.Errorf("error marshaling remediations request: %w", err)
+		return types.RemediationResponse{}, fmt.Errorf("error marshaling pairs: %w", err)
 	}
 
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/remediate", requestJSON)
+	// URL encode the JSON for use in a query parameter
+	encodedPairs := url.QueryEscape(string(pairsJSON))
+
+	// Build the URL with the query parameter
+	requestURL := fmt.Sprintf("%s/?pairs=%s", s.URL, encodedPairs)
+
+	// Make GET request to the remediations service
+	serviceResp := s.Client.Call(ctx, http.MethodGet, requestURL, nil)
 	if serviceResp.Error != nil {
 		return types.RemediationResponse{}, fmt.Errorf("error calling remediations service: %w", serviceResp.Error)
 	}

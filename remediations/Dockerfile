@@ -2,10 +2,11 @@
 FROM golang:1.24-alpine AS builder
 WORKDIR /app
 
-# Copy the telemetry, middleware, config and types modules first
+# Copy the telemetry, middleware, config, health and types modules first
 COPY telemetry/ ./telemetry/
 COPY middleware/ ./middleware/
 COPY config/ ./config/
+COPY health/ ./health/
 COPY types/ ./types/
 
 # Download gin dependency for telemetry module first
@@ -28,6 +29,7 @@ RUN go mod edit -replace=crochet/telemetry=./telemetry
 RUN go mod edit -replace=crochet/middleware=./middleware
 RUN go mod edit -replace=crochet/config=./config
 RUN go mod edit -replace=crochet/types=./types
+RUN go mod edit -replace=crochet/health=./health
 
 # Get dependencies
 RUN go get go.opentelemetry.io/otel
@@ -36,6 +38,8 @@ RUN go get crochet/telemetry
 RUN go get crochet/middleware
 RUN go get crochet/config
 RUN go get crochet/types
+RUN go get crochet/health
+
 # Add Grafana Pyroscope client dependency
 RUN go get github.com/grafana/pyroscope-go
 RUN go get github.com/kelseyhightower/envconfig

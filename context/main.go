@@ -47,10 +47,8 @@ func ginHandleInput(c *gin.Context) {
 	}
 
 	versionCounter++
-
 	log.Printf("Sending response to ingestor: %v", response)
 	log.Println("Flushing logs to ensure visibility")
-
 	c.JSON(http.StatusOK, response)
 }
 

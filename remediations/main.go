@@ -3,44 +3,114 @@ package main
 import (
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"crochet/config"
+	"crochet/health"
 	"crochet/middleware"
-	"crochet/telemetry"
 	"crochet/types"
 
 	"github.com/gin-gonic/gin"
 )
 
-func ginRemediateHandler(c *gin.Context) {
-	var request types.RemediationRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		telemetry.LogAndError(c, err, "remediations", "Invalid JSON format")
+// Global state
+var store *types.RemediationMemoryStore
+var remediationMutex sync.Mutex
+
+func initStore() {
+	store = types.InitRemediationStore()
+	log.Println("Remediation in-memory store initialized successfully")
+}
+
+// findHashesForPairs searches the store for all hashes that match the given pairs
+func findHashesForPairs(pairs [][]string) []string {
+	if len(pairs) == 0 {
+		return []string{}
+	}
+
+	// Create a map to ensure unique hashes
+	uniqueHashes := make(map[string]struct{})
+
+	// For each pair in the request, find matching remediations
+	for _, pair := range pairs {
+		for _, remediation := range store.Remediations {
+			if types.CompareStringSlices(remediation.Pair, pair) {
+				uniqueHashes[remediation.Hash] = struct{}{}
+			}
+		}
+	}
+
+	// Convert the map keys to a slice
+	hashes := make([]string, 0, len(uniqueHashes))
+	for hash := range uniqueHashes {
+		hashes = append(hashes, hash)
+	}
+
+	return hashes
+}
+
+func ginGetRemediationsHandler(c *gin.Context) {
+	// Use the new helper function to process remediation pairs
+	pairs, err := types.ProcessRemediationPairs(c, "remediations")
+	if err != nil {
+		// ProcessRemediationPairs already sets the appropriate error response
 		return
 	}
 
-	pairs_count := len(request.Pairs)
-	log.Printf("Received %d pairs for remediation", pairs_count)
+	pairs_count := len(pairs)
+	log.Printf("Received %d pairs for remediation lookup", pairs_count)
 
 	// Log the pairs we received
-	for i, pair := range request.Pairs {
+	for i, pair := range pairs {
 		log.Printf("Pair %d: %v", i+1, pair)
 	}
 
-	// Return a list of mock hashes as the response
-	hashes := []string{
-		"1234567890abcdef1234567890abcdef",
-		"abcdef1234567890abcdef1234567890",
-		"aabbccddeeff00112233445566778899",
-		"99887766554433221100ffeeddccbbaa",
-		"112233445566778899aabbccddeeff00",
-		"00ffeeddccbbaa99887766554433221",
+	// Find matching hashes in the store
+	hashes := findHashesForPairs(pairs)
+	log.Printf("Found %d matching hashes", len(hashes))
+
+	c.JSON(http.StatusOK, types.RemediationResponse{
+		Status: "OK",
+		Hashes: hashes,
+	})
+}
+
+func ginAddRemediationHandler(c *gin.Context) {
+	// Try to acquire the mutex, return busy status if we can't
+	if !remediationMutex.TryLock() {
+		c.JSON(http.StatusLocked, gin.H{
+			"status":  "error",
+			"message": "Another remediation operation is in progress. Please try again later.",
+		})
+		return
+	}
+	// Ensure we release the mutex when done
+	defer remediationMutex.Unlock()
+
+	// Use the new helper function to process add remediation request
+	request, err := types.ProcessAddRemediationRequest(c, "remediations")
+	if err != nil {
+		// ProcessAddRemediationRequest already sets the appropriate error response
+		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status": "OK",
-		"hashes": hashes,
+	remediation_count := len(request.Remediations)
+	log.Printf("Received %d remediations to add", remediation_count)
+
+	// Log the remediations we received
+	for i, remediation := range request.Remediations {
+		log.Printf("Remediation %d: Pair %v with Hash %s", i+1, remediation.Pair, remediation.Hash)
+	}
+
+	// Save remediations to store
+	addedCount := types.SaveRemediationsToStore(store, request.Remediations)
+	log.Printf("Added %d new remediations to store. Total remediations in store: %d",
+		addedCount, len(store.Remediations))
+
+	c.JSON(http.StatusOK, types.AddRemediationResponse{
+		Status:  "OK",
+		Message: "Remediations added successfully",
 	})
 }
 
@@ -75,11 +145,29 @@ func main() {
 		defer pp.StopWithTimeout(5 * time.Second)
 	}
 
+	// Initialize the remediation store
+	initStore()
+
 	// Register Gin routes
-	router.GET("/", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "OK"})
+	router.GET("/", ginGetRemediationsHandler)
+	router.POST("/add", ginAddRemediationHandler)
+
+	// Set up health check using our local health package
+	healthCheck := health.New(health.Options{
+		ServiceName: cfg.ServiceName,
+		Version:     "1.0.0",
+		Details: map[string]string{
+			"description": "Manages remediations for the Crochet system",
+		},
 	})
-	router.POST("/remediate", ginRemediateHandler)
+
+	// Add dependency checks if needed
+	if cfg.JaegerEndpoint != "" {
+		healthCheck.AddDependencyCheck("jaeger", "http://"+cfg.JaegerEndpoint+"/health")
+	}
+
+	// Register health check handler in the gin router
+	router.GET("/health", gin.WrapF(healthCheck.Handler()))
 
 	address := cfg.GetAddress()
 	log.Printf("Remediations service starting on %s...", address)

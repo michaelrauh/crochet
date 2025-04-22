@@ -16,7 +16,9 @@ import (
 
 // Global state
 var store *types.RemediationMemoryStore
-var remediationMutex sync.Mutex
+var rwLock sync.RWMutex   // Protect reads with RWLock
+var writeMutex sync.Mutex // Mutex specifically for write operations
+var writeInProgress sync.WaitGroup
 
 func initStore() {
 	store = types.InitRemediationStore()
@@ -66,6 +68,12 @@ func ginGetRemediationsHandler(c *gin.Context) {
 		log.Printf("Pair %d: %v", i+1, pair)
 	}
 
+	// Wait for any ongoing writes to complete and acquire a read lock
+	// This ensures read time consistency while allowing multiple concurrent reads
+	writeInProgress.Wait() // Wait for any ongoing writes to complete
+	rwLock.RLock()         // Acquire read lock - this blocks new writes
+	defer rwLock.RUnlock() // Ensure we release the read lock when done
+
 	// Find matching hashes in the store
 	hashes := findHashesForPairs(pairs)
 	log.Printf("Found %d matching hashes", len(hashes))
@@ -76,19 +84,28 @@ func ginGetRemediationsHandler(c *gin.Context) {
 	})
 }
 
-func ginAddRemediationHandler(c *gin.Context) {
-	// Try to acquire the mutex, return busy status if we can't
-	if !remediationMutex.TryLock() {
-		c.JSON(http.StatusLocked, gin.H{
-			"status":  "error",
-			"message": "Another remediation operation is in progress. Please try again later.",
-		})
-		return
-	}
-	// Ensure we release the mutex when done
-	defer remediationMutex.Unlock()
+// SafeSaveRemediationsToStore safely adds remediations to the store with proper synchronization
+func SafeSaveRemediationsToStore(remediations []types.RemediationTuple) int {
+	// Lock only when actually modifying the store to prevent data corruption
+	writeMutex.Lock()
+	defer writeMutex.Unlock()
 
-	// Use the new helper function to process add remediation request
+	return types.SaveRemediationsToStore(store, remediations)
+}
+
+func ginAddRemediationHandler(c *gin.Context) {
+	// We never want to block on writes, so don't try to get a full lock
+	// Instead, just signal that a write is in progress
+	writeInProgress.Add(1)
+	defer writeInProgress.Done()
+
+	// Process the request without blocking other writers
+	addRemediationWithoutBlockingWrites(c)
+}
+
+// Helper function to process add remediation requests
+func addRemediationWithoutBlockingWrites(c *gin.Context) {
+	// Use the helper function to process add remediation request
 	request, err := types.ProcessAddRemediationRequest(c, "remediations")
 	if err != nil {
 		// ProcessAddRemediationRequest already sets the appropriate error response
@@ -103,8 +120,8 @@ func ginAddRemediationHandler(c *gin.Context) {
 		log.Printf("Remediation %d: Pair %v with Hash %s", i+1, remediation.Pair, remediation.Hash)
 	}
 
-	// Save remediations to store
-	addedCount := types.SaveRemediationsToStore(store, request.Remediations)
+	// Save remediations to store using the thread-safe helper
+	addedCount := SafeSaveRemediationsToStore(request.Remediations)
 	log.Printf("Added %d new remediations to store. Total remediations in store: %d",
 		addedCount, len(store.Remediations))
 

@@ -1,11 +1,5 @@
 # Crochet Project Improvement Steps
 
-1. Make Remediations thread safe
-    - Write time consistency is not important, but read time consistency is very important
-    - if writes are queued and ongoing, wait for them to stop and block additional writes to the queue before reading and sending a response.
-    - Do not worry about durability yet
-    - write throughput should be high. Do not block on writes.
-
 2. add version check endpoint to context
 
 3. Create an orthos server

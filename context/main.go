@@ -52,6 +52,18 @@ func ginHandleInput(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// Handler for getting the current version
+func ginGetVersion(c *gin.Context) {
+	log.Printf("Received version request: %v", c.Request)
+
+	response := gin.H{
+		"version": versionCounter,
+	}
+
+	log.Printf("Sending version response: %v", response)
+	c.JSON(http.StatusOK, response)
+}
+
 func main() {
 	log.Println("Starting context service...")
 
@@ -89,6 +101,7 @@ func main() {
 
 	// Register Gin routes
 	router.POST("/input", ginHandleInput)
+	router.GET("/version", ginGetVersion)
 
 	// Set up health check
 	healthCheck := health.New(health.Options{

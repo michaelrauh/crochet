@@ -82,6 +82,37 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  orthos:
+    build:
+      context: .
+      dockerfile: ./orthos/Dockerfile
+    ports:
+      - "8083:8083"
+    networks:
+      - app-network
+    depends_on:
+      - jaeger
+      - otel-collector
+      - pyroscope
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8083/health | grep -q 200 || (echo 'Health check failed' && exit 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    environment:
+      - ORTHOS_SERVICE_NAME=orthos
+      - ORTHOS_PORT=8083
+      - ORTHOS_HOST=0.0.0.0
+      - ORTHOS_JAEGER_ENDPOINT=jaeger:4317
+      - ORTHOS_METRICS_ENDPOINT=otel-collector:4317
+      - ORTHOS_PYROSCOPE_ENDPOINT=http://pyroscope:4040
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
   
   jaeger:
     image: jaegertracing/all-in-one:latest

@@ -2,12 +2,14 @@ go 1.24.2
 
 use (
 	.
+	./clients
 	./config
 	./context
 	./health
 	./httpclient
 	./ingestor
 	./middleware
+	./orthos
 	./remediations
 	./telemetry
 	./text

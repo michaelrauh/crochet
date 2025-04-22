@@ -16,14 +16,13 @@ require (
 	crochet/config v0.0.0-00010101000000-000000000000
 	crochet/health v0.0.0-00010101000000-000000000000
 	crochet/middleware v0.0.0-00010101000000-000000000000
-	crochet/telemetry v0.0.0
 	crochet/types v0.0.0-00010101000000-000000000000
 	github.com/gin-gonic/gin v1.10.0
-	github.com/google/go-cmp v0.7.0
 	github.com/stretchr/testify v1.10.0
 )
 
 require (
+	crochet/telemetry v0.0.0 // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect

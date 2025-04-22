@@ -1,7 +1,5 @@
 # Crochet Project Improvement Steps
 
-2. add version check endpoint to context
-
 3. Create an orthos server
     - It should have fast probabilistic checks and nonprobabalistic checks possible
 

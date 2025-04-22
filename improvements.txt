@@ -1,16 +1,13 @@
 # Crochet Project Improvement Steps
-
-4. Add ability to remove remediations 
-
-5. Create a work server 
    
-6. Work server should have queue semantics 
+6. Create work server
 
 7. Have ingestor call the work server 
     - Play remediations
     - Play an empty ortho 
+    - delete remediations
 
-8. Implement the worker server 
+8. Implement the search server 
     - Implement call pattern
     - Implement search logic 
     - implement metrics - start with queue depth, ortho count by size, queue count by size, average time to process by size, likelihood that there are hits by size, time remaining estimate, total found per input, number of input corpora, uptime, number of remediations

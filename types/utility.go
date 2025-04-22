@@ -150,3 +150,58 @@ func ProcessAddRemediationRequest(c *gin.Context, serviceName string) (AddRemedi
 
 	return request, nil
 }
+
+// ProcessDeleteRemediationRequest extracts and processes delete remediation request from an HTTP request
+// Returns the request and an error if any occurred
+func ProcessDeleteRemediationRequest(c *gin.Context, serviceName string) (DeleteRemediationRequest, error) {
+	var request DeleteRemediationRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": fmt.Sprintf("Invalid request format: %v", err),
+		})
+		return DeleteRemediationRequest{}, fmt.Errorf("invalid request format: %w", err)
+	}
+
+	// Validate the request
+	if len(request.Hashes) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "No hashes provided for deletion",
+		})
+		return DeleteRemediationRequest{}, fmt.Errorf("no hashes provided for deletion")
+	}
+
+	return request, nil
+}
+
+// DeleteRemediationsFromStore removes remediations with matching hashes from the store
+// Returns the count of deleted remediations
+func DeleteRemediationsFromStore(store *RemediationMemoryStore, hashes []string) int {
+	if len(hashes) == 0 {
+		return 0
+	}
+
+	// Create a map for faster hash lookups
+	hashMap := make(map[string]struct{})
+	for _, hash := range hashes {
+		hashMap[hash] = struct{}{}
+	}
+
+	// Create a new slice to hold remediations that aren't being deleted
+	newRemediations := make([]RemediationTuple, 0, len(store.Remediations))
+	deletedCount := 0
+
+	// Add only remediations that don't have a hash in the delete list
+	for _, remediation := range store.Remediations {
+		if _, shouldDelete := hashMap[remediation.Hash]; !shouldDelete {
+			newRemediations = append(newRemediations, remediation)
+		} else {
+			deletedCount++
+		}
+	}
+
+	// Replace the old remediations slice with the filtered one
+	store.Remediations = newRemediations
+	return deletedCount
+}

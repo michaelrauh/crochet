@@ -33,6 +33,7 @@ func setupRouter() *gin.Engine {
 
 	router.GET("/", ginGetRemediationsHandler)
 	router.POST("/add", ginAddRemediationHandler)
+	router.POST("/delete", ginDeleteRemediationHandler)
 
 	return router
 }
@@ -193,4 +194,137 @@ func TestGinAddRemediationHandler(t *testing.T) {
 
 	// Verify that the new items were added to the store (4 existing + 2 new)
 	assert.Equal(t, 6, len(store.Remediations))
+}
+
+func TestGinDeleteRemediationHandler(t *testing.T) {
+	router := setupRouter()
+
+	// Create a sample delete remediation request
+	request := types.DeleteRemediationRequest{
+		Hashes: []string{"hash1", "hash3"}, // Delete two existing hashes
+	}
+
+	jsonData, _ := json.Marshal(request)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/delete", bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(w, req)
+
+	// Check the response
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response types.DeleteRemediationResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", response.Status)
+	assert.Equal(t, "Remediations deleted successfully", response.Message)
+	assert.Equal(t, 2, response.Count) // 2 items should be deleted
+
+	// Verify that the items were removed from the store (4 existing - 2 deleted)
+	assert.Equal(t, 2, len(store.Remediations))
+
+	// Check which hashes remain
+	remainingHashes := make(map[string]struct{})
+	for _, remediation := range store.Remediations {
+		remainingHashes[remediation.Hash] = struct{}{}
+	}
+
+	// hash2 and hash4 should still be in the store
+	_, hash2Exists := remainingHashes["hash2"]
+	_, hash4Exists := remainingHashes["hash4"]
+	assert.True(t, hash2Exists, "hash2 should still exist in store")
+	assert.True(t, hash4Exists, "hash4 should still exist in store")
+
+	// hash1 and hash3 should have been deleted
+	_, hash1Exists := remainingHashes["hash1"]
+	_, hash3Exists := remainingHashes["hash3"]
+	assert.False(t, hash1Exists, "hash1 should have been deleted from store")
+	assert.False(t, hash3Exists, "hash3 should have been deleted from store")
+}
+
+func TestGinDeleteRemediationHandlerEmptyRequest(t *testing.T) {
+	router := setupRouter()
+
+	// Create a sample delete remediation request with no hashes
+	request := types.DeleteRemediationRequest{
+		Hashes: []string{},
+	}
+
+	jsonData, _ := json.Marshal(request)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/delete", bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(w, req)
+
+	// Check the response - should return a bad request
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response gin.H
+	json.Unmarshal(w.Body.Bytes(), &response)
+
+	// Check error message
+	assert.Equal(t, "error", response["status"])
+	assert.Equal(t, "No hashes provided for deletion", response["message"])
+
+	// Verify that the store has not changed
+	assert.Equal(t, 4, len(store.Remediations))
+}
+
+func TestGinDeleteRemediationHandlerNonExistentHashes(t *testing.T) {
+	router := setupRouter()
+
+	// Create a request with hashes that don't exist in the store
+	request := types.DeleteRemediationRequest{
+		Hashes: []string{"nonexistent1", "nonexistent2"},
+	}
+
+	jsonData, _ := json.Marshal(request)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/delete", bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(w, req)
+
+	// Check the response
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response types.DeleteRemediationResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", response.Status)
+	assert.Equal(t, "Remediations deleted successfully", response.Message)
+	assert.Equal(t, 0, response.Count) // No items should be deleted
+
+	// Verify that the store has not changed
+	assert.Equal(t, 4, len(store.Remediations))
+}
+
+func TestGinDeleteRemediationHandlerInvalidRequest(t *testing.T) {
+	router := setupRouter()
+
+	// Create a request with invalid JSON
+	invalidJSON := []byte(`{"hashes": [1, 2, 3]}`) // Hashes should be strings, not integers
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/delete", bytes.NewBuffer(invalidJSON))
+	req.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(w, req)
+
+	// Check the response
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response gin.H
+	json.Unmarshal(w.Body.Bytes(), &response)
+
+	// Check error message
+	assert.Equal(t, "error", response["status"])
+	assert.Contains(t, response["message"].(string), "Invalid request format")
 }

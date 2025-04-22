@@ -59,6 +59,18 @@ type AddRemediationResponse struct {
 	Message string `mapstructure:"message" json:"message"`
 }
 
+// DeleteRemediationRequest represents the request to delete remediations by hash
+type DeleteRemediationRequest struct {
+	Hashes []string `mapstructure:"hashes" json:"hashes"`
+}
+
+// DeleteRemediationResponse represents the response after deleting remediations
+type DeleteRemediationResponse struct {
+	Status  string `mapstructure:"status" json:"status"`
+	Message string `mapstructure:"message" json:"message"`
+	Count   int    `mapstructure:"count" json:"count"`
+}
+
 // Ortho represents orthogonal data structure from orthos service
 type Ortho struct {
 	Grid     map[string]interface{} `mapstructure:"grid" json:"grid"`

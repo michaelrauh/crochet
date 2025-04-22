@@ -93,6 +93,15 @@ func SafeSaveRemediationsToStore(remediations []types.RemediationTuple) int {
 	return types.SaveRemediationsToStore(store, remediations)
 }
 
+// SafeDeleteRemediationsFromStore safely removes remediations from the store with proper synchronization
+func SafeDeleteRemediationsFromStore(hashes []string) int {
+	// Lock only when actually modifying the store to prevent data corruption
+	writeMutex.Lock()
+	defer writeMutex.Unlock()
+
+	return types.DeleteRemediationsFromStore(store, hashes)
+}
+
 func ginAddRemediationHandler(c *gin.Context) {
 	// We never want to block on writes, so don't try to get a full lock
 	// Instead, just signal that a write is in progress
@@ -128,6 +137,38 @@ func addRemediationWithoutBlockingWrites(c *gin.Context) {
 	c.JSON(http.StatusOK, types.AddRemediationResponse{
 		Status:  "OK",
 		Message: "Remediations added successfully",
+	})
+}
+
+func ginDeleteRemediationHandler(c *gin.Context) {
+	// Signal that a write is in progress
+	writeInProgress.Add(1)
+	defer writeInProgress.Done()
+
+	// Process the delete remediation request
+	request, err := types.ProcessDeleteRemediationRequest(c, "remediations")
+	if err != nil {
+		// ProcessDeleteRemediationRequest already sets the appropriate error response
+		return
+	}
+
+	hash_count := len(request.Hashes)
+	log.Printf("Received %d hashes to delete", hash_count)
+
+	// Log the hashes we received
+	for i, hash := range request.Hashes {
+		log.Printf("Hash %d to delete: %s", i+1, hash)
+	}
+
+	// Delete remediations from store using the thread-safe helper
+	deletedCount := SafeDeleteRemediationsFromStore(request.Hashes)
+	log.Printf("Deleted %d remediations from store. Total remediations remaining in store: %d",
+		deletedCount, len(store.Remediations))
+
+	c.JSON(http.StatusOK, types.DeleteRemediationResponse{
+		Status:  "OK",
+		Message: "Remediations deleted successfully",
+		Count:   deletedCount,
 	})
 }
 
@@ -168,6 +209,7 @@ func main() {
 	// Register Gin routes
 	router.GET("/", ginGetRemediationsHandler)
 	router.POST("/add", ginAddRemediationHandler)
+	router.POST("/delete", ginDeleteRemediationHandler)
 
 	// Set up health check using our local health package
 	healthCheck := health.New(health.Options{

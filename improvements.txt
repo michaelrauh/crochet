@@ -1,13 +1,6 @@
 # Crochet Project Improvement Steps
 
-3. Create an orthos server
-    - It should have fast probabilistic checks and nonprobabalistic checks possible
-    - It should be possible to retrieve by ID from an array
-    - It should be possible to check if one exists using an ID with a bloom filter
-
 4. Add ability to remove remediations 
-
-4. Have ingestor call orthos with remediation IDs to get the orthos back. Consider streaming or chunking to reduce memory overhead.
 
 5. Create a work server 
    
@@ -21,6 +14,7 @@
     - Implement call pattern
     - Implement search logic 
     - implement metrics - start with queue depth, ortho count by size, queue count by size, average time to process by size, likelihood that there are hits by size, time remaining estimate, total found per input, number of input corpora, uptime, number of remediations
+    - make positive the ingestor is properly handling remediations and jaeger picks up remediation and orthos calls
 
 9. Make sure remediations have referential integrity to orthos
     - If write to orthos fails, abort write to remediations 

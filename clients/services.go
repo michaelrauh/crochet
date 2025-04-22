@@ -77,6 +77,41 @@ func (s *RemediationsServiceClient) FetchRemediations(ctx context.Context, reque
 	return response, nil
 }
 
+// OrthosServiceClient implements the types.OrthosService interface
+type OrthosServiceClient struct {
+	URL    string
+	Client *httpclient.Client
+}
+
+// GetOrthosByIDs sends request to the orthos service to retrieve orthos by their IDs
+func (s *OrthosServiceClient) GetOrthosByIDs(ctx context.Context, ids []string) (types.OrthosResponse, error) {
+	// Create the request body with IDs
+	requestBody := map[string][]string{
+		"ids": ids,
+	}
+
+	// Marshal to JSON for the HTTP request
+	requestJSON, err := json.Marshal(requestBody)
+	if err != nil {
+		return types.OrthosResponse{}, fmt.Errorf("error marshaling orthos request: %w", err)
+	}
+
+	// Make POST request to the orthos service
+	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/orthos/get", requestJSON)
+	if serviceResp.Error != nil {
+		return types.OrthosResponse{}, fmt.Errorf("error calling orthos service: %w", serviceResp.Error)
+	}
+
+	log.Printf("Received orthos service raw response: %v", serviceResp.RawResponse)
+
+	var response types.OrthosResponse
+	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
+		return types.OrthosResponse{}, fmt.Errorf("error parsing orthos response: %w", err)
+	}
+
+	return response, nil
+}
+
 // NewContextService creates a new context service client
 func NewContextService(url string, client *httpclient.Client) types.ContextService {
 	return &ContextServiceClient{
@@ -88,6 +123,14 @@ func NewContextService(url string, client *httpclient.Client) types.ContextServi
 // NewRemediationsService creates a new remediations service client
 func NewRemediationsService(url string, client *httpclient.Client) types.RemediationsService {
 	return &RemediationsServiceClient{
+		URL:    url,
+		Client: client,
+	}
+}
+
+// NewOrthosService creates a new orthos service client
+func NewOrthosService(url string, client *httpclient.Client) types.OrthosService {
+	return &OrthosServiceClient{
 		URL:    url,
 		Client: client,
 	}

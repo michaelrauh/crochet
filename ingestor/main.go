@@ -28,7 +28,7 @@ type contextKey string
 // config key constant
 const configKey contextKey = "config"
 
-func ginHandleTextInput(c *gin.Context, contextService types.ContextService, remediationsService types.RemediationsService) {
+func ginHandleTextInput(c *gin.Context, contextService types.ContextService, remediationsService types.RemediationsService, orthosService types.OrthosService) {
 	// Try to acquire the mutex, return busy status if we can't
 	if !ingestMutex.TryLock() {
 		c.JSON(http.StatusLocked, gin.H{
@@ -74,11 +74,31 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	// If we have hashes from the remediation service, get corresponding orthos
+	var orthosResp types.OrthosResponse
+	if len(remediationResp.Hashes) > 0 {
+		// Get orthos by hashes (which are ortho IDs)
+		orthosResp, err = orthosService.GetOrthosByIDs(c.Request.Context(), remediationResp.Hashes)
+		if telemetry.LogAndError(c, err, "ingestor", "Error fetching orthos") {
+			return
+		}
+		log.Printf("Retrieved %d orthos for %d hash IDs", orthosResp.Count, len(remediationResp.Hashes))
+	}
+
+	// Return all data to the client
+	response := gin.H{
 		"status":  "success",
 		"version": contextResponse.Version,
 		"hashes":  remediationResp.Hashes,
-	})
+	}
+
+	// Add orthos to the response if we have any
+	if orthosResp.Count > 0 {
+		response["orthos"] = orthosResp.Orthos
+		response["orthosCount"] = orthosResp.Count
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func main() {
@@ -124,12 +144,13 @@ func main() {
 	// Initialize services using the new clients package
 	contextService := clients.NewContextService(cfg.ContextServiceURL, httpClient)
 	remediationsService := clients.NewRemediationsService(cfg.RemediationsServiceURL, httpClient)
+	orthosService := clients.NewOrthosService(cfg.OrthosServiceURL, httpClient)
 
 	// Register routes
 	router.POST("/ingest", func(c *gin.Context) {
 		ctxWithConfig := context.WithValue(c.Request.Context(), configKey, cfg)
 		c.Request = c.Request.WithContext(ctxWithConfig)
-		ginHandleTextInput(c, contextService, remediationsService)
+		ginHandleTextInput(c, contextService, remediationsService, orthosService)
 	})
 
 	// Start the server

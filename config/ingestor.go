@@ -5,6 +5,7 @@ type IngestorConfig struct {
 	BaseConfig
 	ContextServiceURL      string `envconfig:"CONTEXT_SERVICE_URL" required:"true"`
 	RemediationsServiceURL string `envconfig:"REMEDIATIONS_SERVICE_URL" required:"true"`
+	OrthosServiceURL       string `envconfig:"ORTHOS_SERVICE_URL" required:"true"`
 }
 
 // Validate checks the ingestor configuration for required values
@@ -20,6 +21,9 @@ func (c *IngestorConfig) Validate() error {
 	}
 	if c.RemediationsServiceURL == "" {
 		return NewConfigError("REMEDIATIONS_SERVICE_URL is required")
+	}
+	if c.OrthosServiceURL == "" {
+		return NewConfigError("ORTHOS_SERVICE_URL is required")
 	}
 	return nil
 }

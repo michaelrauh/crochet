@@ -14,3 +14,8 @@ type ContextService interface {
 type RemediationsService interface {
 	FetchRemediations(ctx context.Context, request RemediationRequest) (RemediationResponse, error)
 }
+
+// OrthosService defines the interface for interacting with the orthos service
+type OrthosService interface {
+	GetOrthosByIDs(ctx context.Context, ids []string) (OrthosResponse, error)
+}

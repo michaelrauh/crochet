@@ -10,6 +10,7 @@ services:
       - jaeger
       - otel-collector
       - pyroscope
+      - orthos
     networks:
       - app-network
     environment:
@@ -17,6 +18,7 @@ services:
       - INGESTOR_CONTEXT_SERVICE_URL=http://context:8081
       - INGESTOR_PORT=8080
       - INGESTOR_REMEDIATIONS_SERVICE_URL=http://remediations:8082
+      - INGESTOR_ORTHOS_SERVICE_URL=http://orthos:8083
       - INGESTOR_JAEGER_ENDPOINT=jaeger:4317
       - INGESTOR_METRICS_ENDPOINT=otel-collector:4317
       - INGESTOR_PYROSCOPE_ENDPOINT=http://pyroscope:4040

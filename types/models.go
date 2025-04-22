@@ -58,3 +58,20 @@ type AddRemediationResponse struct {
 	Status  string `mapstructure:"status" json:"status"`
 	Message string `mapstructure:"message" json:"message"`
 }
+
+// Ortho represents orthogonal data structure from orthos service
+type Ortho struct {
+	Grid     map[string]interface{} `mapstructure:"grid" json:"grid"`
+	Shape    []int                  `mapstructure:"shape" json:"shape"`
+	Position []int                  `mapstructure:"position" json:"position"`
+	Shell    int                    `mapstructure:"shell" json:"shell"`
+	ID       string                 `mapstructure:"id" json:"id"`
+}
+
+// OrthosResponse represents the response from the orthos service
+type OrthosResponse struct {
+	Status  string  `mapstructure:"status" json:"status"`
+	Message string  `mapstructure:"message" json:"message"`
+	Count   int     `mapstructure:"count" json:"count"`
+	Orthos  []Ortho `mapstructure:"orthos" json:"orthos"`
+}

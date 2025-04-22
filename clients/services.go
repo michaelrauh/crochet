@@ -112,6 +112,41 @@ func (s *OrthosServiceClient) GetOrthosByIDs(ctx context.Context, ids []string) 
 	return response, nil
 }
 
+// WorkServerServiceClient implements the types.WorkServerService interface
+type WorkServerServiceClient struct {
+	URL    string
+	Client *httpclient.Client
+}
+
+// PushOrthos sends a request to push orthos to the work server
+func (s *WorkServerServiceClient) PushOrthos(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
+	// Create the request body with orthos
+	requestBody := map[string][]types.Ortho{
+		"orthos": orthos,
+	}
+
+	// Marshal to JSON for the HTTP request
+	requestJSON, err := json.Marshal(requestBody)
+	if err != nil {
+		return types.WorkServerPushResponse{}, fmt.Errorf("error marshaling work server push request: %w", err)
+	}
+
+	// Make POST request to the work server push endpoint
+	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/push", requestJSON)
+	if serviceResp.Error != nil {
+		return types.WorkServerPushResponse{}, fmt.Errorf("error calling work server: %w", serviceResp.Error)
+	}
+
+	log.Printf("Received work server push response: %v", serviceResp.RawResponse)
+
+	var response types.WorkServerPushResponse
+	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
+		return types.WorkServerPushResponse{}, fmt.Errorf("error parsing work server push response: %w", err)
+	}
+
+	return response, nil
+}
+
 // NewContextService creates a new context service client
 func NewContextService(url string, client *httpclient.Client) types.ContextService {
 	return &ContextServiceClient{
@@ -131,6 +166,14 @@ func NewRemediationsService(url string, client *httpclient.Client) types.Remedia
 // NewOrthosService creates a new orthos service client
 func NewOrthosService(url string, client *httpclient.Client) types.OrthosService {
 	return &OrthosServiceClient{
+		URL:    url,
+		Client: client,
+	}
+}
+
+// NewWorkServerService creates a new work server client
+func NewWorkServerService(url string, client *httpclient.Client) types.WorkServerService {
+	return &WorkServerServiceClient{
 		URL:    url,
 		Client: client,
 	}

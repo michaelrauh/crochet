@@ -28,7 +28,7 @@ type contextKey string
 // config key constant
 const configKey contextKey = "config"
 
-func ginHandleTextInput(c *gin.Context, contextService types.ContextService, remediationsService types.RemediationsService, orthosService types.OrthosService) {
+func ginHandleTextInput(c *gin.Context, contextService types.ContextService, remediationsService types.RemediationsService, orthosService types.OrthosService, workServerService types.WorkServerService) {
 	// Try to acquire the mutex, return busy status if we can't
 	if !ingestMutex.TryLock() {
 		c.JSON(http.StatusLocked, gin.H{
@@ -83,6 +83,15 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 			return
 		}
 		log.Printf("Retrieved %d orthos for %d hash IDs", orthosResp.Count, len(remediationResp.Hashes))
+
+		// Push the retrieved orthos to work server
+		if orthosResp.Count > 0 {
+			workServerResp, err := workServerService.PushOrthos(c.Request.Context(), orthosResp.Orthos)
+			if telemetry.LogAndError(c, err, "ingestor", "Error pushing orthos to work server") {
+				return
+			}
+			log.Printf("Pushed %d orthos to work server, received %d IDs", workServerResp.Count, len(workServerResp.IDs))
+		}
 	}
 
 	// Return all data to the client
@@ -145,12 +154,13 @@ func main() {
 	contextService := clients.NewContextService(cfg.ContextServiceURL, httpClient)
 	remediationsService := clients.NewRemediationsService(cfg.RemediationsServiceURL, httpClient)
 	orthosService := clients.NewOrthosService(cfg.OrthosServiceURL, httpClient)
+	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, httpClient)
 
 	// Register routes
 	router.POST("/ingest", func(c *gin.Context) {
 		ctxWithConfig := context.WithValue(c.Request.Context(), configKey, cfg)
 		c.Request = c.Request.WithContext(ctxWithConfig)
-		ginHandleTextInput(c, contextService, remediationsService, orthosService)
+		ginHandleTextInput(c, contextService, remediationsService, orthosService, workServerService)
 	})
 
 	// Start the server

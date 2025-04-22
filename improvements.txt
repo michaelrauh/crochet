@@ -1,6 +1,4 @@
 # Crochet Project Improvement Steps
-   
-1. Create work server
 
 2. Have ingestor call the work server 
     - Play remediations

@@ -19,3 +19,8 @@ type RemediationsService interface {
 type OrthosService interface {
 	GetOrthosByIDs(ctx context.Context, ids []string) (OrthosResponse, error)
 }
+
+// WorkServerService defines the interface for interacting with the work server
+type WorkServerService interface {
+	PushOrthos(ctx context.Context, orthos []Ortho) (WorkServerPushResponse, error)
+}

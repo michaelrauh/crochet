@@ -26,6 +26,7 @@ func setupTestEnvironment() {
 	os.Setenv("INGESTOR_CONTEXT_SERVICE_URL", "http://context:8081")
 	os.Setenv("INGESTOR_REMEDIATIONS_SERVICE_URL", "http://remediations:8082")
 	os.Setenv("INGESTOR_ORTHOS_SERVICE_URL", "http://orthos:8083")
+	os.Setenv("INGESTOR_WORK_SERVER_URL", "http://workserver:8084")
 }
 
 func teardownTestEnvironment() {
@@ -37,6 +38,7 @@ func teardownTestEnvironment() {
 	os.Unsetenv("INGESTOR_CONTEXT_SERVICE_URL")
 	os.Unsetenv("INGESTOR_REMEDIATIONS_SERVICE_URL")
 	os.Unsetenv("INGESTOR_ORTHOS_SERVICE_URL")
+	os.Unsetenv("INGESTOR_WORK_SERVER_URL")
 }
 
 // TestMain handles setup and teardown for all tests
@@ -77,14 +79,23 @@ func (m *MockOrthosService) GetOrthosByIDs(ctx context.Context, ids []string) (t
 	return m.GetOrthosByIDsFunc(ctx, ids)
 }
 
+// MockWorkServerService implements the WorkServerService interface
+type MockWorkServerService struct {
+	PushOrthosFunc func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error)
+}
+
+func (m *MockWorkServerService) PushOrthos(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
+	return m.PushOrthosFunc(ctx, orthos)
+}
+
 // setupGinRouter creates a test Gin router with the specified handlers
-func setupGinRouter(contextService types.ContextService, remediationsService types.RemediationsService, orthosService types.OrthosService) *gin.Engine {
+func setupGinRouter(contextService types.ContextService, remediationsService types.RemediationsService, orthosService types.OrthosService, workServerService types.WorkServerService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New() // Use New instead of Default to avoid default middleware
 	r.Use(gin.Recovery())
 	r.Use(telemetry.GinErrorHandler()) // Use the shared error handler middleware
 	r.POST("/ingest", func(c *gin.Context) {
-		ginHandleTextInput(c, contextService, remediationsService, orthosService)
+		ginHandleTextInput(c, contextService, remediationsService, orthosService, workServerService)
 	})
 	return r
 }
@@ -128,7 +139,18 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 		},
 	}
 
-	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService)
+	mockWorkServerService := &MockWorkServerService{
+		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
+			return types.WorkServerPushResponse{
+				Status:  "success",
+				Message: "Items pushed to work queue successfully",
+				Count:   len(orthos),
+				IDs:     []string{"1234567890abcdef1234567890abcdef"},
+			}, nil
+		},
+	}
+
+	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 	body := `{"title": "Test Title", "text": "Test Content"}`
 	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -168,7 +190,13 @@ func TestHandleTextInputInvalidJSON(t *testing.T) {
 		},
 	}
 
-	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService)
+	mockWorkServerService := &MockWorkServerService{
+		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
+			return types.WorkServerPushResponse{}, nil
+		},
+	}
+
+	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 	invalidJSON := `{title:"Invalid JSON"}`
 	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(invalidJSON))
 	req.Header.Set("Content-Type", "application/json")
@@ -208,7 +236,13 @@ func TestHandleTextInputEmptyBody(t *testing.T) {
 		},
 	}
 
-	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService)
+	mockWorkServerService := &MockWorkServerService{
+		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
+			return types.WorkServerPushResponse{}, nil
+		},
+	}
+
+	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 	req, _ := http.NewRequest("POST", "/ingest", bytes.NewBufferString(""))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -238,7 +272,13 @@ func TestHandleTextInputWrongMethod(t *testing.T) {
 		},
 	}
 
-	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService)
+	mockWorkServerService := &MockWorkServerService{
+		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
+			return types.WorkServerPushResponse{}, nil
+		},
+	}
+
+	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 	req, _ := http.NewRequest("GET", "/ingest", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -273,7 +313,13 @@ func TestHandleTextInputWithMissingFields(t *testing.T) {
 		},
 	}
 
-	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService)
+	mockWorkServerService := &MockWorkServerService{
+		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
+			return types.WorkServerPushResponse{}, nil
+		},
+	}
+
+	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 	// Missing the 'text' field
 	body := `{"title": "Test Title"}`
 	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
@@ -316,7 +362,13 @@ func TestErrorHandlerMiddleware(t *testing.T) {
 		},
 	}
 
-	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService)
+	mockWorkServerService := &MockWorkServerService{
+		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
+			return types.WorkServerPushResponse{}, nil
+		},
+	}
+
+	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 	body := `{"title": "Test Title", "text": "Test Content"}`
 	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -395,7 +447,18 @@ func TestConcurrentRequests(t *testing.T) {
 		},
 	}
 
-	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService)
+	mockWorkServerService := &MockWorkServerService{
+		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
+			return types.WorkServerPushResponse{
+				Status:  "success",
+				Message: "Items pushed to work queue successfully",
+				Count:   len(orthos),
+				IDs:     []string{"1234567890abcdef1234567890abcdef"},
+			}, nil
+		},
+	}
+
+	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 
 	// Create the first request
 	body := `{"title": "Test Title", "text": "Test Content"}`

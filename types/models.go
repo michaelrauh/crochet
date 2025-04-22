@@ -87,3 +87,11 @@ type OrthosResponse struct {
 	Count   int     `mapstructure:"count" json:"count"`
 	Orthos  []Ortho `mapstructure:"orthos" json:"orthos"`
 }
+
+// WorkServerPushResponse represents the response from the workserver's push endpoint
+type WorkServerPushResponse struct {
+	Status  string   `mapstructure:"status" json:"status"`
+	Message string   `mapstructure:"message" json:"message"`
+	Count   int      `mapstructure:"count" json:"count"`
+	IDs     []string `mapstructure:"ids" json:"ids"`
+}

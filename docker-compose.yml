@@ -44,7 +44,7 @@ services:
       - otel-collector
       - pyroscope
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/health | grep -q 200 || (echo 'Health check failed' && exit 1)"]
+      test: ["CMD", "wget", "-q", "--spider", "--header=Accept: application/json", "http://localhost:8081/health"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -100,7 +100,7 @@ services:
       - otel-collector
       - pyroscope
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8083/health | grep -q 200 || (echo 'Health check failed' && exit 1)"]
+      test: ["CMD", "wget", "-q", "--spider", "--header=Accept: application/json", "http://localhost:8083/health"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -132,7 +132,7 @@ services:
       - pyroscope
       - orthos
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8084/health | grep -q 200 || (echo 'Health check failed' && exit 1)"]
+      test: ["CMD", "wget", "-q", "--spider", "--header=Accept: application/json", "http://localhost:8084/health"]
       interval: 5s
       timeout: 3s
       retries: 5

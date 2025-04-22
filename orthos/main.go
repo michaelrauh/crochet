@@ -205,8 +205,12 @@ func main() {
 			"environment": "development",
 		},
 	}
+
 	// Create the health service
 	healthService := health.New(healthOptions)
+
+	// Note: Explicitly NOT adding any dependency checks as they might cause failures
+	// and mark the service as unhealthy in Docker's health check
 
 	// Register health check endpoint
 	router.GET("/health", gin.WrapF(healthService.Handler()))

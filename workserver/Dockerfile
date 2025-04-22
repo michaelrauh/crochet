@@ -54,6 +54,8 @@ RUN go build -tags=prod -o workserver .
 # Use a smaller image for the runtime
 FROM alpine:latest
 
+# Install curl for healthcheck
+RUN apk add --no-cache curl
 RUN apk --no-cache add ca-certificates
 
 WORKDIR /app

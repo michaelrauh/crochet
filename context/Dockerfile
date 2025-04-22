@@ -7,6 +7,8 @@ COPY ./middleware/ ./middleware/
 COPY ./config/ ./config/
 COPY ./health/ ./health/
 COPY ./types/ ./types/
+COPY ./clients/ ./clients/
+COPY ./httpclient/ ./httpclient/
 
 # Download gin dependency for telemetry module first
 WORKDIR /app/telemetry
@@ -29,34 +31,17 @@ RUN go mod edit -replace=crochet/health=../health
 RUN go mod edit -replace=crochet/types=../types
 RUN go mod tidy
 
-# Download dependencies
-RUN go mod download
-
-# Get dependencies
-RUN go get go.opentelemetry.io/otel
-RUN go get go.opentelemetry.io/otel/trace
-RUN go get crochet/telemetry
-RUN go get crochet/middleware
-RUN go get crochet/config
-RUN go get crochet/health
-RUN go get crochet/types
-RUN go get github.com/gin-gonic/gin
-RUN go get github.com/grafana/pyroscope-go
-
-# Install curl
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
 # Build the application with the production build tag
-RUN CGO_ENABLED=0 GOOS=linux go build -tags=prod -o main ./main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -v -o main .
 
 FROM alpine:latest
-WORKDIR /app
-
-# Copy the built binary from the builder stage
-COPY --from=builder /app/context/main ./main
+WORKDIR /root/
 
 # Install curl for healthcheck
-RUN apk --no-cache add curl
+RUN apk add --no-cache curl
+
+# Copy the built binary from the builder stage
+COPY --from=builder /app/context/main .
 
 # Expose the port
 EXPOSE 8081

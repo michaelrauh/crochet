@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine as builder
+FROM golang:1.24-alpine AS builder
 WORKDIR /app
 # Copy shared libraries and dependencies first
 COPY telemetry/ ./telemetry/
@@ -47,6 +47,8 @@ RUN go build -tags=prod -o orthos main.go
 # Use a small image for the final container
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
+# Install curl for healthcheck
+RUN apk add --no-cache curl
 WORKDIR /root/
 # Copy the binary from the builder stage
 COPY --from=builder /app/orthos .

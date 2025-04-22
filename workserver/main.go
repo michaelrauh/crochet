@@ -33,6 +33,9 @@ func setupRoutes(router *gin.Engine, cfg *config.WorkServerConfig) {
 
 	// Create the health service
 	healthService := health.New(healthOptions)
+
+	// Note: Not adding any dependency checks to avoid failures during Docker health checks
+
 	router.GET("/health", gin.WrapF(healthService.Handler()))
 
 	// Register API routes

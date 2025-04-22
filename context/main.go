@@ -112,10 +112,8 @@ func main() {
 		},
 	})
 
-	// Add dependency checks if needed
-	if cfg.JaegerEndpoint != "" {
-		healthCheck.AddDependencyCheck("jaeger", "http://"+cfg.JaegerEndpoint+"/health")
-	}
+	// DO NOT add Jaeger dependency check since it's a gRPC service, not HTTP
+	// Jaeger health should be monitored separately
 
 	// Register health check handler in the gin router
 	router.GET("/health", gin.WrapF(healthCheck.Handler()))

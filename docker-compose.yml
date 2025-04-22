@@ -116,6 +116,39 @@ services:
         max-size: "10m"
         max-file: "3"
   
+  workserver:
+    build:
+      context: .
+      dockerfile: ./workserver/Dockerfile
+    ports:
+      - "8084:8084"
+    networks:
+      - app-network
+    depends_on:
+      - jaeger
+      - otel-collector
+      - pyroscope
+      - orthos
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8084/health | grep -q 200 || (echo 'Health check failed' && exit 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    environment:
+      - WORKSERVER_SERVICE_NAME=workserver
+      - WORKSERVER_PORT=8084
+      - WORKSERVER_HOST=0.0.0.0
+      - WORKSERVER_JAEGER_ENDPOINT=jaeger:4317
+      - WORKSERVER_METRICS_ENDPOINT=otel-collector:4317
+      - WORKSERVER_PYROSCOPE_ENDPOINT=http://pyroscope:4040
+      - WORKSERVER_REQUEUE_TIMEOUT_SECONDS=300
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+  
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:

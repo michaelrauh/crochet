@@ -19,6 +19,12 @@ cd orthos
 go test -tags=test -v ./...
 cd ..
 
+# Run unit tests for the workserver service
+echo "Running unit tests for workserver service..."
+cd workserver
+go test -tags=test -v ./...
+cd ..
+
 # Run unit tests for the clients package
 echo "Running unit tests for clients package..."
 cd clients

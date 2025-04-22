@@ -1,22 +1,23 @@
 # Crochet Project Improvement Steps
    
-6. Create work server
+1. Create work server
 
-7. Have ingestor call the work server 
+2. Have ingestor call the work server 
     - Play remediations
     - Play an empty ortho 
     - delete remediations
 
-8. Implement the search server 
+3. Implement the search server 
     - Implement call pattern
     - Implement search logic 
     - implement metrics - start with queue depth, ortho count by size, queue count by size, average time to process by size, likelihood that there are hits by size, time remaining estimate, total found per input, number of input corpora, uptime, number of remediations
     - make positive the ingestor is properly handling remediations and jaeger picks up remediation and orthos calls
+    - check connection of all services to all monitoring
 
-9. Make sure remediations have referential integrity to orthos
+4. Make sure remediations have referential integrity to orthos
     - If write to orthos fails, abort write to remediations 
 
-10. Make the services more scalable and durable
+5. Make the services more scalable and durable
     - Make sure storage backends can scale 
     - Make state durable 
     - Move to K8s 

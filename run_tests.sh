@@ -13,6 +13,12 @@ cd remediations
 go test -tags=test -v ./...
 cd ..
 
+# Run unit tests for the orthos service
+echo "Running unit tests for orthos service..."
+cd orthos
+go test -tags=test -v ./...
+cd ..
+
 # Run unit tests for the clients package
 echo "Running unit tests for clients package..."
 cd clients

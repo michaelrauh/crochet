@@ -5,6 +5,7 @@ import (
 	"crochet/config"
 	"crochet/health"
 	"crochet/middleware"
+	"crochet/types"
 	"log"
 	"time"
 
@@ -76,6 +77,26 @@ func main() {
 
 	// Initialize work queue with timeout from config
 	workQueue = NewWorkQueue(cfg.RequeueTimeoutSeconds)
+
+	// Add some initial test work items for testing the flow
+	initialOrthos := []types.Ortho{
+		{
+			ID:       "test-ortho-1",
+			Shape:    []int{2, 2},
+			Position: []int{0, 0},
+			Shell:    1,
+			Grid:     map[string]interface{}{"x": 1, "y": 2},
+		},
+		{
+			ID:       "test-ortho-2",
+			Shape:    []int{3, 3},
+			Position: []int{1, 1},
+			Shell:    2,
+			Grid:     map[string]interface{}{"x": 3, "y": 4},
+		},
+	}
+	workQueue.Push(initialOrthos)
+	log.Printf("Added %d initial test work items to the queue", len(initialOrthos))
 
 	// Set up common components using the shared helper
 	router, tp, mp, pp, err := middleware.SetupCommonComponents(

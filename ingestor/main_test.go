@@ -55,37 +55,137 @@ func TestMain(m *testing.M) {
 // MockContextService implements the updated ContextService interface
 type MockContextService struct {
 	SendMessageFunc func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error)
+	GetVersionFunc  func(ctx context.Context) (types.VersionResponse, error)
+	GetContextFunc  func(ctx context.Context) (types.ContextDataResponse, error)
 }
 
 func (m *MockContextService) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
 	return m.SendMessageFunc(ctx, input)
 }
 
+func (m *MockContextService) GetVersion(ctx context.Context) (types.VersionResponse, error) {
+	if m.GetVersionFunc != nil {
+		return m.GetVersionFunc(ctx)
+	}
+	// Default implementation if not provided
+	return types.VersionResponse{
+		Version: 1,
+	}, nil
+}
+
+func (m *MockContextService) GetContext(ctx context.Context) (types.ContextDataResponse, error) {
+	if m.GetContextFunc != nil {
+		return m.GetContextFunc(ctx)
+	}
+	// Default implementation if not provided
+	return types.ContextDataResponse{
+		Version:    1,
+		Vocabulary: []string{"mock", "vocabulary"},
+		Lines:      [][]string{{"mock", "line"}},
+	}, nil
+}
+
 // MockRemediationsService implements the updated RemediationsService interface
 type MockRemediationsService struct {
-	FetchRemediationsFunc func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error)
+	FetchRemediationsFunc  func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error)
+	DeleteRemediationsFunc func(ctx context.Context, hashes []string) (types.DeleteRemediationResponse, error)
+	AddRemediationsFunc    func(ctx context.Context, remediations []types.RemediationTuple) (types.AddRemediationResponse, error)
 }
 
 func (m *MockRemediationsService) FetchRemediations(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
 	return m.FetchRemediationsFunc(ctx, request)
 }
 
+func (m *MockRemediationsService) DeleteRemediations(ctx context.Context, hashes []string) (types.DeleteRemediationResponse, error) {
+	if m.DeleteRemediationsFunc != nil {
+		return m.DeleteRemediationsFunc(ctx, hashes)
+	}
+	// Default implementation if not provided
+	return types.DeleteRemediationResponse{
+		Status:  "OK",
+		Message: "Mock remediations deleted successfully",
+		Count:   len(hashes),
+	}, nil
+}
+
+func (m *MockRemediationsService) AddRemediations(ctx context.Context, remediations []types.RemediationTuple) (types.AddRemediationResponse, error) {
+	if m.AddRemediationsFunc != nil {
+		return m.AddRemediationsFunc(ctx, remediations)
+	}
+	// Default implementation if not provided
+	return types.AddRemediationResponse{
+		Status:  "OK",
+		Message: "Mock remediations added successfully",
+	}, nil
+}
+
 // MockOrthosService implements the OrthosService interface
 type MockOrthosService struct {
 	GetOrthosByIDsFunc func(ctx context.Context, ids []string) (types.OrthosResponse, error)
+	SaveOrthosFunc     func(ctx context.Context, orthos []types.Ortho) (types.OrthosSaveResponse, error)
 }
 
 func (m *MockOrthosService) GetOrthosByIDs(ctx context.Context, ids []string) (types.OrthosResponse, error) {
 	return m.GetOrthosByIDsFunc(ctx, ids)
 }
 
+func (m *MockOrthosService) SaveOrthos(ctx context.Context, orthos []types.Ortho) (types.OrthosSaveResponse, error) {
+	if m.SaveOrthosFunc != nil {
+		return m.SaveOrthosFunc(ctx, orthos)
+	}
+	// Default implementation if not provided
+	return types.OrthosSaveResponse{
+		Status:  "success",
+		Message: "Mock orthos saved successfully",
+		Count:   len(orthos),
+	}, nil
+}
+
 // MockWorkServerService implements the WorkServerService interface
 type MockWorkServerService struct {
 	PushOrthosFunc func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error)
+	PopFunc        func(ctx context.Context) (types.WorkServerPopResponse, error)
+	AckFunc        func(ctx context.Context, id string) (types.WorkServerAckResponse, error)
+	NackFunc       func(ctx context.Context, id string) (types.WorkServerAckResponse, error)
 }
 
 func (m *MockWorkServerService) PushOrthos(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
 	return m.PushOrthosFunc(ctx, orthos)
+}
+
+func (m *MockWorkServerService) Pop(ctx context.Context) (types.WorkServerPopResponse, error) {
+	if m.PopFunc != nil {
+		return m.PopFunc(ctx)
+	}
+	// Default implementation if not provided
+	return types.WorkServerPopResponse{
+		Status:  "success",
+		Message: "Mock item popped from queue",
+		Ortho:   nil,
+		ID:      "",
+	}, nil
+}
+
+func (m *MockWorkServerService) Ack(ctx context.Context, id string) (types.WorkServerAckResponse, error) {
+	if m.AckFunc != nil {
+		return m.AckFunc(ctx, id)
+	}
+	// Default implementation if not provided
+	return types.WorkServerAckResponse{
+		Status:  "success",
+		Message: "Mock work item acknowledged",
+	}, nil
+}
+
+func (m *MockWorkServerService) Nack(ctx context.Context, id string) (types.WorkServerAckResponse, error) {
+	if m.NackFunc != nil {
+		return m.NackFunc(ctx, id)
+	}
+	// Default implementation if not provided
+	return types.WorkServerAckResponse{
+		Status:  "success",
+		Message: "Mock work item returned to queue",
+	}, nil
 }
 
 // setupGinRouter creates a test Gin router with the specified handlers

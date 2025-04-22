@@ -129,9 +129,8 @@ func handleOrthos(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
-		"message": "Received orthos successfully",
+		"message": "Orthos saved successfully",
 		"count":   len(request.Orthos),
-		"total":   len(orthosStorage.orthos),
 		"newIDs":  newIDs,
 	})
 }

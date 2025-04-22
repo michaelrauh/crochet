@@ -137,6 +137,7 @@ func addRemediationWithoutBlockingWrites(c *gin.Context) {
 	c.JSON(http.StatusOK, types.AddRemediationResponse{
 		Status:  "OK",
 		Message: "Remediations added successfully",
+		Count:   addedCount,
 	})
 }
 

@@ -57,6 +57,7 @@ type AddRemediationRequest struct {
 type AddRemediationResponse struct {
 	Status  string `mapstructure:"status" json:"status"`
 	Message string `mapstructure:"message" json:"message"`
+	Count   int    `mapstructure:"count" json:"count"`
 }
 
 // DeleteRemediationRequest represents the request to delete remediations by hash

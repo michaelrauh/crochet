@@ -81,6 +81,16 @@ func handleAck(c *gin.Context) {
 		return
 	}
 
+	// Validate ID
+	if request.ID == "" {
+		log.Printf("Received ACK request with empty ID")
+		c.JSON(http.StatusBadRequest, AckResponse{
+			Status:  "error",
+			Message: "Empty work item ID is not valid",
+		})
+		return
+	}
+
 	// Acknowledge the work item
 	success := workQueue.Ack(request.ID)
 
@@ -108,6 +118,16 @@ func handleNack(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
 			"message": "Invalid request format",
+		})
+		return
+	}
+
+	// Validate ID
+	if request.ID == "" {
+		log.Printf("Received NACK request with empty ID")
+		c.JSON(http.StatusBadRequest, AckResponse{
+			Status:  "error",
+			Message: "Empty work item ID is not valid",
 		})
 		return
 	}

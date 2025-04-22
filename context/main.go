@@ -64,6 +64,37 @@ func ginGetVersion(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// Handler for getting the entire context (vocabulary and lines)
+func ginGetContext(c *gin.Context) {
+	log.Printf("Received context data request: %v", c.Request)
+
+	// Convert vocabulary map to slice
+	vocabularySlice := make([]string, 0, len(store.Vocabulary))
+	for word := range store.Vocabulary {
+		vocabularySlice = append(vocabularySlice, word)
+	}
+
+	// Convert subphrases map to lines (2D slice)
+	linesSlice := make([][]string, 0, len(store.Subphrases))
+	for subphrase := range store.Subphrases {
+		// Split the joined subphrase back into words
+		words := types.SplitSubphrase(subphrase)
+		if len(words) > 0 {
+			linesSlice = append(linesSlice, words)
+		}
+	}
+
+	response := gin.H{
+		"version":    versionCounter,
+		"vocabulary": vocabularySlice,
+		"lines":      linesSlice,
+	}
+
+	log.Printf("Sending context data response with %d vocabulary terms and %d lines",
+		len(vocabularySlice), len(linesSlice))
+	c.JSON(http.StatusOK, response)
+}
+
 func main() {
 	log.Println("Starting context service...")
 
@@ -102,6 +133,7 @@ func main() {
 	// Register Gin routes
 	router.POST("/input", ginHandleInput)
 	router.GET("/version", ginGetVersion)
+	router.GET("/context", ginGetContext)
 
 	// Set up health check
 	healthCheck := health.New(health.Options{

@@ -36,3 +36,9 @@ func SaveSubphrasesToStore(store *ContextMemoryStore, subphrases [][]string) [][
 	}
 	return newlyAdded
 }
+
+// SplitSubphrase splits a joined subphrase string back into individual words
+func SplitSubphrase(joinedSubphrase string) []string {
+	// Simple split by space since we join with space in SaveSubphrasesToStore
+	return strings.Split(joinedSubphrase, " ")
+}

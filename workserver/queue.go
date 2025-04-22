@@ -2,6 +2,7 @@ package main
 
 import (
 	"crochet/types"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -27,25 +28,33 @@ func (q *WorkQueue) Push(orthos []types.Ortho) []string {
 	if len(orthos) == 0 {
 		return []string{}
 	}
-
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
-
 	now := time.Now()
 	ids := make([]string, len(orthos))
-
 	for i, ortho := range orthos {
+		// Generate a unique ID if the ortho doesn't have one
+		itemID := ortho.ID
+		if itemID == "" {
+			// Create a timestamp-based unique ID
+			itemID = fmt.Sprintf("work-%d-%d", now.UnixNano(), i)
+
+			// Make a copy of the ortho to avoid modifying the original
+			orthoWithID := ortho
+			orthoWithID.ID = itemID
+			ortho = orthoWithID
+		}
+
 		workItem := &WorkItem{
 			Ortho:        ortho,
 			EnqueuedTime: now,
 			DequeuedTime: nil,
-			ID:           ortho.ID,
+			ID:           itemID,
 			InProgress:   false,
 		}
 		q.items = append(q.items, workItem)
-		ids[i] = ortho.ID
+		ids[i] = itemID
 	}
-
 	log.Printf("Added %d items to work queue. Total items: %d", len(orthos), len(q.items))
 	return ids
 }

@@ -1,14 +1,12 @@
 # Crochet Project Improvement Steps
 
-1. Have ingestor call the work server 
-    - Play an empty ortho 
-    - delete remediations
-
-2. Implement the search server 
+1. Implement the search server 
     - Implement call pattern
     - Implement search logic 
+    - Check all monitoring
+    - Unify work and ortho ids
     
-3. implement metrics 
+2. Implement metrics 
     - queue depth
     - ortho count by size
     - queue count by size

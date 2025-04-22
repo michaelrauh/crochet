@@ -74,6 +74,9 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 		return
 	}
 
+	// Store the hashes we received for later cleanup
+	processedHashes := remediationResp.Hashes
+
 	// If we have hashes from the remediation service, get corresponding orthos
 	var orthosResp types.OrthosResponse
 	if len(remediationResp.Hashes) > 0 {
@@ -91,6 +94,35 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 				return
 			}
 			log.Printf("Pushed %d orthos to work server, received %d IDs", workServerResp.Count, len(workServerResp.IDs))
+		}
+	}
+
+	// Create a blank ortho as specified
+	blankOrtho := types.Ortho{
+		Grid:     make(map[string]interface{}),
+		Shape:    []int{2, 2},
+		Position: []int{0, 0},
+		Shell:    0,
+		ID:       "",
+	}
+
+	// Push the blank ortho to work server
+	blankOrthoArray := []types.Ortho{blankOrtho}
+	blankWorkServerResp, err := workServerService.PushOrthos(c.Request.Context(), blankOrthoArray)
+	if telemetry.LogAndError(c, err, "ingestor", "Error pushing blank ortho to work server") {
+		return
+	}
+	log.Printf("Pushed blank ortho to work server, received %d IDs", len(blankWorkServerResp.IDs))
+
+	// Clean up processed remediations - only delete the ones we've handled
+	if len(processedHashes) > 0 {
+		log.Printf("Cleaning up %d processed remediation hashes", len(processedHashes))
+		deleteResp, err := remediationsService.DeleteRemediations(c.Request.Context(), processedHashes)
+		if err != nil {
+			// Log the error but continue - this is cleanup so we don't want to fail the request
+			log.Printf("Warning: Failed to delete processed remediations: %v", err)
+		} else {
+			log.Printf("Successfully deleted %d remediations", deleteResp.Count)
 		}
 	}
 

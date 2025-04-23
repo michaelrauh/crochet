@@ -5,11 +5,12 @@ import (
 	"crochet/config"
 	"crochet/health"
 	"crochet/middleware"
-	"crochet/types"
 	"log"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Global queue instance
@@ -21,8 +22,90 @@ type contextKey string
 // config key constant
 const configKey contextKey = "config"
 
-// setupRoutes configures the API endpoints
-func setupRoutes(router *gin.Engine, cfg *config.WorkServerConfig) {
+// Custom metrics for the workserver
+var (
+	queueDepthTotal = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "workserver_queue_depth_total",
+			Help: "Total number of items in the work queue",
+		},
+	)
+
+	// Use a gauge vector instead of individual gauges for each shape
+	queueDepthByShape = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workserver_queue_depth_shape",
+			Help: "Number of items in the work queue by shape",
+		},
+		[]string{"shape"},
+	)
+)
+
+func init() {
+	// Register all metrics with Prometheus
+	prometheus.MustRegister(queueDepthTotal)
+	prometheus.MustRegister(queueDepthByShape)
+}
+
+// updateQueueMetrics periodically updates the queue metrics
+func updateQueueMetrics() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Update total queue depth
+			queueDepthTotal.Set(float64(workQueue.Count()))
+
+			// Update shape-specific metrics
+			shapeCounts := workQueue.CountByShape()
+
+			// Reset all shape gauges to avoid stale metrics
+			queueDepthByShape.Reset()
+
+			// Set metrics for all shapes in the queue
+			for shape, count := range shapeCounts {
+				queueDepthByShape.WithLabelValues(shape).Set(float64(count))
+			}
+
+			log.Printf("Updated metrics with queue data: %v", shapeCounts)
+		}
+	}
+}
+
+func main() {
+	// Load configuration using the helper
+	cfg, err := config.LoadWorkServerConfig()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	// Log configuration details
+	log.Printf("Using configuration: %+v", cfg)
+	config.LogConfig(cfg.BaseConfig)
+
+	// Initialize work queue with timeout from config
+	workQueue = NewWorkQueue(cfg.RequeueTimeoutSeconds)
+
+	// Start metrics update goroutine
+	go updateQueueMetrics()
+
+	// Create a router using the middleware package's functionality
+	router, _, _, _, err := middleware.SetupCommonComponents(
+		cfg.ServiceName,
+		cfg.JaegerEndpoint,
+		cfg.MetricsEndpoint,
+		cfg.PyroscopeEndpoint,
+	)
+
+	if err != nil {
+		log.Fatalf("Failed to setup common components: %v", err)
+	}
+
+	// Add the Prometheus handler explicitly
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
 	// Register health check endpoint
 	healthOptions := health.Options{
 		ServiceName: cfg.ServiceName,
@@ -34,9 +117,6 @@ func setupRoutes(router *gin.Engine, cfg *config.WorkServerConfig) {
 
 	// Create the health service
 	healthService := health.New(healthOptions)
-
-	// Note: Not adding any dependency checks to avoid failures during Docker health checks
-
 	router.GET("/health", gin.WrapF(healthService.Handler()))
 
 	// Register API routes
@@ -62,64 +142,6 @@ func setupRoutes(router *gin.Engine, cfg *config.WorkServerConfig) {
 		c.Request = c.Request.WithContext(ctxWithConfig)
 		handleNack(c)
 	})
-}
-
-func main() {
-	// Load configuration using the helper
-	cfg, err := config.LoadWorkServerConfig()
-	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
-	}
-
-	// Log configuration details
-	log.Printf("Using configuration: %+v", cfg)
-	config.LogConfig(cfg.BaseConfig)
-
-	// Initialize work queue with timeout from config
-	workQueue = NewWorkQueue(cfg.RequeueTimeoutSeconds)
-
-	// Add some initial test work items for testing the flow
-	initialOrthos := []types.Ortho{
-		{
-			ID:       "test-ortho-1",
-			Shape:    []int{2, 2},
-			Position: []int{0, 0},
-			Shell:    1,
-			Grid:     map[string]interface{}{"x": 1, "y": 2},
-		},
-		{
-			ID:       "test-ortho-2",
-			Shape:    []int{3, 3},
-			Position: []int{1, 1},
-			Shell:    2,
-			Grid:     map[string]interface{}{"x": 3, "y": 4},
-		},
-	}
-	workQueue.Push(initialOrthos)
-	log.Printf("Added %d initial test work items to the queue", len(initialOrthos))
-
-	// Set up common components using the shared helper
-	router, tp, mp, pp, err := middleware.SetupCommonComponents(
-		cfg.ServiceName,
-		cfg.JaegerEndpoint,
-		cfg.MetricsEndpoint,
-		cfg.PyroscopeEndpoint,
-	)
-	if err != nil {
-		log.Fatalf("Failed to set up application: %v", err)
-	}
-
-	// Ensure resources are properly cleaned up
-	defer tp.ShutdownWithTimeout(5 * time.Second)
-	if mp != nil {
-		defer mp.ShutdownWithTimeout(5 * time.Second)
-	}
-	if pp != nil {
-		defer pp.StopWithTimeout(5 * time.Second)
-	}
-
-	// Set up routes
-	setupRoutes(router, cfg)
 
 	// Start the server
 	address := cfg.GetAddress()

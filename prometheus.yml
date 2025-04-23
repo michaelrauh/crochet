@@ -8,15 +8,48 @@ scrape_configs:
       - targets: ['localhost:9090']
 
   - job_name: 'otel-collector'
-    scrape_interval: 10s
+    scrape_interval: 5s
     static_configs:
       - targets: ['otel-collector:8889']
         labels:
           group: 'otel-collector'
 
-  - job_name: 'crochet-services'
-    scrape_interval: 10s
+  # Comment out the duplicate scrape job for search service metrics via otel-collector
+  # - job_name: 'crochet-services'
+  #   scrape_interval: 10s
+  #   static_configs:
+  #     - targets: ['otel-collector:8889']
+  #       labels:
+  #         group: 'crochet-services'
+
+  - job_name: 'workserver'
+    scrape_interval: 5s
+    metrics_path: '/metrics'
     static_configs:
-      - targets: ['otel-collector:8889']
+      - targets: ['host.docker.internal:8084']
         labels:
-          group: 'crochet-services'
+          service: 'workserver'
+
+  - job_name: 'orthos'
+    scrape_interval: 5s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8083']
+        labels:
+          service: 'orthos'
+
+  - job_name: 'search'
+    scrape_interval: 5s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8085', 'search:8085']
+        labels:
+          service: 'search'
+
+  - job_name: 'remediations'
+    scrape_interval: 5s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8082']
+        labels:
+          service: 'remediations'

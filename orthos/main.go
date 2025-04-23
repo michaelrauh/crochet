@@ -5,12 +5,15 @@ import (
 	"crochet/health"
 	"crochet/middleware"
 	"crochet/telemetry"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // OrthosConfig holds configuration specific to the orthos server
@@ -37,6 +40,50 @@ type OrthosGetRequest struct {
 	IDs []string `json:"ids"`
 }
 
+// Custom metrics for the orthos service
+var (
+	orthosTotalCount = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "orthos_total_count",
+			Help: "Total number of orthos stored in the service",
+		},
+	)
+	orthosCountByShape = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "orthos_count_by_shape",
+			Help: "Number of orthos stored by shape",
+		},
+		[]string{"shape"},
+	)
+)
+
+func init() {
+	// Register metrics with Prometheus
+	prometheus.MustRegister(orthosTotalCount)
+	prometheus.MustRegister(orthosCountByShape)
+}
+
+// updateOrthoMetrics updates the orthos metrics
+func updateOrthoMetrics(storage *OrthosStorage) {
+	// Get current orthos count by shape
+	shapeCounts := storage.CountOrthosByShape()
+
+	// Set total count
+	totalCount := len(storage.orthos)
+	orthosTotalCount.Set(float64(totalCount))
+
+	// Reset shape metrics to avoid stale metrics
+	orthosCountByShape.Reset()
+
+	// Set shape-specific metrics
+	for shape, count := range shapeCounts {
+		orthosCountByShape.WithLabelValues(shape).Set(float64(count))
+	}
+
+	// Add more detailed logging
+	log.Printf("Updated orthos metrics: total=%d, shapes=%v", totalCount, shapeCounts)
+}
+
 // OrthosStorage provides thread-safe storage for orthos
 type OrthosStorage struct {
 	orthos map[string]Ortho
@@ -48,6 +95,24 @@ func NewOrthosStorage() *OrthosStorage {
 	return &OrthosStorage{
 		orthos: make(map[string]Ortho),
 	}
+}
+
+// CountOrthosByShape returns a count of orthos grouped by shape
+func (s *OrthosStorage) CountOrthosByShape() map[string]int {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	shapeCounts := make(map[string]int)
+
+	for _, ortho := range s.orthos {
+		if len(ortho.Shape) == 2 {
+			// Format shape as "NxM" where N and M are the dimensions
+			shapeKey := fmt.Sprintf("%dx%d", ortho.Shape[0], ortho.Shape[1])
+			shapeCounts[shapeKey]++
+		}
+	}
+
+	return shapeCounts
 }
 
 // AddOrthos adds multiple orthos to storage with thread safety and returns new IDs
@@ -98,6 +163,25 @@ func (s *OrthosStorage) GetOrthosByIDs(ids []string) []Ortho {
 // Global storage instance
 var orthosStorage *OrthosStorage
 
+// startMetricsUpdater periodically updates the orthos metrics
+func startMetricsUpdater(storage *OrthosStorage) {
+	log.Printf("Starting metrics updater background task")
+
+	// Immediately update metrics on startup
+	updateOrthoMetrics(storage)
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			log.Printf("Metrics update triggered by ticker")
+			updateOrthoMetrics(storage)
+		}
+	}
+}
+
 func handleRoot(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Hello World",
@@ -126,6 +210,9 @@ func handleOrthos(c *gin.Context) {
 
 	// Store orthos in memory and get new IDs
 	newIDs := orthosStorage.AddOrthos(request.Orthos)
+
+	// Update metrics explicitly after adding new orthos
+	updateOrthoMetrics(orthosStorage)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
@@ -164,6 +251,9 @@ func main() {
 	// Initialize orthos storage
 	orthosStorage = NewOrthosStorage()
 
+	// Start background metrics updater
+	go startMetricsUpdater(orthosStorage)
+
 	// Load configuration
 	var cfg OrthosConfig
 	// Set service name before loading config
@@ -196,6 +286,12 @@ func main() {
 		defer pp.StopWithTimeout(5 * time.Second)
 	}
 
+	// Add the Prometheus handler explicitly
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	// Log that we're registering the metrics endpoint
+	log.Printf("Registered /metrics endpoint for Prometheus")
+
 	// Create health check service with appropriate options
 	healthOptions := health.Options{
 		ServiceName: cfg.ServiceName,
@@ -207,9 +303,6 @@ func main() {
 
 	// Create the health service
 	healthService := health.New(healthOptions)
-
-	// Note: Explicitly NOT adding any dependency checks as they might cause failures
-	// and mark the service as unhealthy in Docker's health check
 
 	// Register health check endpoint
 	router.GET("/health", gin.WrapF(healthService.Handler()))

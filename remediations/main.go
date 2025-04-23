@@ -12,6 +12,8 @@ import (
 	"crochet/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Global state
@@ -20,9 +22,36 @@ var rwLock sync.RWMutex   // Protect reads with RWLock
 var writeMutex sync.Mutex // Mutex specifically for write operations
 var writeInProgress sync.WaitGroup
 
+// Prometheus metrics
+var (
+	remediationsCount = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "remediations_total_count",
+			Help: "Total number of remediations stored in the service",
+		},
+	)
+)
+
+func init() {
+	// Register metrics with Prometheus
+	prometheus.MustRegister(remediationsCount)
+}
+
+// updateRemediationsMetrics updates the metric for total remediation count
+func updateRemediationsMetrics() {
+	rwLock.RLock()
+	count := len(store.Remediations)
+	rwLock.RUnlock()
+
+	remediationsCount.Set(float64(count))
+	log.Printf("Updated remediations metrics: total=%d", count)
+}
+
 func initStore() {
 	store = types.InitRemediationStore()
 	log.Println("Remediation in-memory store initialized successfully")
+	// Initialize metrics after store setup
+	updateRemediationsMetrics()
 }
 
 // findHashesForPairs searches the store for all hashes that match the given pairs
@@ -90,7 +119,10 @@ func SafeSaveRemediationsToStore(remediations []types.RemediationTuple) int {
 	writeMutex.Lock()
 	defer writeMutex.Unlock()
 
-	return types.SaveRemediationsToStore(store, remediations)
+	addedCount := types.SaveRemediationsToStore(store, remediations)
+	// Update metrics after modifying the store
+	updateRemediationsMetrics()
+	return addedCount
 }
 
 // SafeDeleteRemediationsFromStore safely removes remediations from the store with proper synchronization
@@ -99,7 +131,10 @@ func SafeDeleteRemediationsFromStore(hashes []string) int {
 	writeMutex.Lock()
 	defer writeMutex.Unlock()
 
-	return types.DeleteRemediationsFromStore(store, hashes)
+	deletedCount := types.DeleteRemediationsFromStore(store, hashes)
+	// Update metrics after modifying the store
+	updateRemediationsMetrics()
+	return deletedCount
 }
 
 func ginAddRemediationHandler(c *gin.Context) {
@@ -207,6 +242,10 @@ func main() {
 	// Initialize the remediation store
 	initStore()
 
+	// Add the Prometheus handler explicitly
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	log.Printf("Registered /metrics endpoint for Prometheus")
+
 	// Register Gin routes
 	router.GET("/", ginGetRemediationsHandler)
 	router.POST("/add", ginAddRemediationHandler)
@@ -228,6 +267,19 @@ func main() {
 
 	// Register health check handler in the gin router
 	router.GET("/health", gin.WrapF(healthCheck.Handler()))
+
+	// Start periodic metrics update in the background
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				updateRemediationsMetrics()
+			}
+		}
+	}()
 
 	address := cfg.GetAddress()
 	log.Printf("Remediations service starting on %s...", address)

@@ -39,7 +39,5 @@ if ! echo "$response2" | grep -q '"version":2'; then
     exit 1
 fi
 
-docker-compose logs
-
 docker-compose down --remove-orphans
 echo "success"

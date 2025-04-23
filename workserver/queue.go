@@ -4,6 +4,7 @@ import (
 	"crochet/types"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -137,4 +138,40 @@ func (q *WorkQueue) Count() int {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
 	return len(q.items)
+}
+
+// CountByShape returns a map of shape to count of items with that shape
+func (q *WorkQueue) CountByShape() map[string]int {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	// Map to store counts by shape
+	shapeCounts := make(map[string]int)
+
+	for _, item := range q.items {
+		// Convert shape slice to string representation (e.g., "2x2", "3x3")
+		shape := fmt.Sprintf("%dx%d", item.Ortho.Shape[0], item.Ortho.Shape[1])
+		shapeCounts[shape]++
+	}
+
+	return shapeCounts
+}
+
+// CountByShapeName returns the count of items with the specified shape name
+func (q *WorkQueue) CountByShapeName(shapeName string) int {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	count := 0
+	for _, item := range q.items {
+		// Convert shape slice to string representation (e.g., "2x2", "3x3")
+		shape := fmt.Sprintf("%dx%d", item.Ortho.Shape[0], item.Ortho.Shape[1])
+		// Normalize the shape name
+		shape = strings.ReplaceAll(shape, "×", "x")
+		if shape == shapeName {
+			count++
+		}
+	}
+
+	return count
 }

@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -24,6 +26,12 @@ import (
 var currentVersion int
 var contextVocabulary []string
 var contextLines [][]string
+
+// Global metrics
+var processingTimeByShape metric.Float64Histogram
+var searchSuccessByShape metric.Float64Counter
+var itemsFoundByShape metric.Float64Counter
+var searchesByShape metric.Int64Counter
 
 // Maximum number of orthos and remediations to generate for demonstration purposes
 const MAX_GENERATED_ITEMS = 5
@@ -43,6 +51,9 @@ func processWorkItem(
 	ctx, span := tracer.Start(ctx, "processWorkItem")
 	defer span.End()
 
+	// Record the start time for processing duration metric
+	startTime := time.Now()
+
 	// Add work item details to the span
 	span.SetAttributes(
 		attribute.String("work_item.id", itemID),
@@ -51,12 +62,38 @@ func processWorkItem(
 
 	log.Printf("Processing work item with ID: %s", itemID)
 
+	// Create a shape string (e.g., "2x3") for the ortho
+	shapeStr := fmt.Sprintf("%dx%d", ortho.Shape[0], ortho.Shape[1])
+
+	// Record that we processed a search for this shape
+	searchesByShape.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("shape", shapeStr),
+	))
+
 	// Add a span for generating random orthos
 	ctx, genOrthosSpan := tracer.Start(ctx, "generate_orthos")
 	generatedOrthos := generateRandomOrthos(ortho, rand.Intn(MAX_GENERATED_ITEMS))
 	genOrthosSpan.SetAttributes(attribute.Int("generated_count", len(generatedOrthos)))
 	genOrthosSpan.End()
 	log.Printf("Generated %d new orthos from input", len(generatedOrthos))
+
+	// Record metrics for whether items were found and how many
+	if len(generatedOrthos) > 0 {
+		// Record that the search was successful (found at least one item)
+		searchSuccessByShape.Add(ctx, 1.0, metric.WithAttributes(
+			attribute.String("shape", shapeStr),
+		))
+
+		// Record the total number of items found for this search
+		itemsFoundByShape.Add(ctx, float64(len(generatedOrthos)), metric.WithAttributes(
+			attribute.String("shape", shapeStr),
+		))
+	} else {
+		// Record a search with zero items found (still counts as a search)
+		itemsFoundByShape.Add(ctx, 0.0, metric.WithAttributes(
+			attribute.String("shape", shapeStr),
+		))
+	}
 
 	// Add a span for generating random remediations
 	ctx, genRemSpan := tracer.Start(ctx, "generate_remediations")
@@ -196,6 +233,16 @@ func processWorkItem(
 	ackSpan.End()
 
 	log.Printf("Sent ACK for work item: %s, response: %s", itemID, ackResp.Status)
+
+	// Calculate and record the processing time in seconds
+	processingTime := time.Since(startTime).Seconds()
+
+	// Record the processing time with the shape as an attribute
+	processingTimeByShape.Record(ctx, processingTime, metric.WithAttributes(
+		attribute.String("shape", shapeStr),
+	))
+
+	log.Printf("Recorded processing time for ortho shape %s: %.3f seconds", shapeStr, processingTime)
 }
 
 // sendNack is a helper function to send a NACK with error logging
@@ -386,9 +433,11 @@ func startWorker(
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
+					// Fix the non-constant format string error
 					errMsg := fmt.Sprintf("PANIC during processing: %v", r)
-					log.Printf(errMsg)
-					processSpan.RecordError(fmt.Errorf(errMsg))
+					log.Println(errMsg)
+					// Fix the non-constant format string error in fmt.Errorf
+					processSpan.RecordError(fmt.Errorf("%s", errMsg))
 
 					// Try to NACK the item after a panic
 					nackCtx, nackSpan := tracer.Start(rootCtx, "nack_after_panic")
@@ -459,6 +508,46 @@ func main() {
 		defer pp.StopWithTimeout(5 * time.Second)
 	}
 
+	// Initialize custom metrics
+	meter := mp.Meter(cfg.ServiceName)
+	var err2 error
+	processingTimeByShape, err2 = meter.Float64Histogram(
+		"ortho_processing_duration_seconds_by_shape",
+		metric.WithDescription("Duration of ortho processing in seconds by shape"),
+		metric.WithUnit("s"),
+	)
+	if err2 != nil {
+		log.Fatalf("Failed to create processing time metric: %v", err2)
+	}
+
+	// Initialize metrics for search counts and success rates by input ortho shape
+	searchesByShape, err2 = meter.Int64Counter(
+		"ortho_searches_by_shape",
+		metric.WithDescription("Total number of searches processed by input ortho shape"),
+		metric.WithUnit("{search}"),
+	)
+	if err2 != nil {
+		log.Fatalf("Failed to create searches by shape metric: %v", err2)
+	}
+
+	searchSuccessByShape, err2 = meter.Float64Counter(
+		"ortho_search_success_by_shape",
+		metric.WithDescription("Number of searches that found at least one item by input ortho shape"),
+		metric.WithUnit("{success}"),
+	)
+	if err2 != nil {
+		log.Fatalf("Failed to create search success metric: %v", err2)
+	}
+
+	itemsFoundByShape, err2 = meter.Float64Counter(
+		"ortho_items_found_by_shape",
+		metric.WithDescription("Total count of items found in searches by input ortho shape"),
+		metric.WithUnit("{item}"),
+	)
+	if err2 != nil {
+		log.Fatalf("Failed to create items found metric: %v", err2)
+	}
+
 	// Set the global TextMapPropagator for OpenTelemetry
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
@@ -508,8 +597,11 @@ func main() {
 	// Create the health service
 	healthService := health.New(healthOptions)
 
-	// Register health check endpoint only
+	// Register health check endpoint
 	router.GET("/health", gin.WrapF(healthService.Handler()))
+
+	// Register metrics endpoint with proper handler from the Prometheus client
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Start the server
 	address := cfg.GetAddress()

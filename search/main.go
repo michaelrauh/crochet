@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -38,6 +39,36 @@ var processingTimeByShape metric.Float64Histogram
 var searchSuccessByShape metric.Float64Counter
 var itemsFoundByShape metric.Float64Counter
 var searchesByShape metric.Int64Counter
+
+// New metrics that include position
+var itemsFoundByShapePosition metric.Float64Counter
+var searchesByShapePosition metric.Int64Counter
+var searchSuccessByShapePosition metric.Float64Counter
+
+// Add Prometheus metrics to complement OpenTelemetry metrics
+var (
+	prometheusSearchSuccessByShapePosition = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "crochet_ortho_search_success_by_shape_position_total",
+			Help: "Number of searches that found at least one item by input ortho shape and position",
+		},
+		[]string{"shape", "position"},
+	)
+
+	prometheusSearchesByShapePosition = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "crochet_ortho_searches_by_shape_position_total",
+			Help: "Total number of searches processed by input ortho shape and position",
+		},
+		[]string{"shape", "position"},
+	)
+)
+
+func init() {
+	// Register prometheus metrics
+	prometheus.MustRegister(prometheusSearchSuccessByShapePosition)
+	prometheus.MustRegister(prometheusSearchesByShapePosition)
+}
 
 // ProcessWorkItem handles a single work item according to the pattern in work.md
 func ProcessWorkItem(
@@ -67,11 +98,20 @@ func ProcessWorkItem(
 
 	// Use the string representation of the shape array as the shape label for metrics, to match other services
 	shapeStr := fmt.Sprintf("%v", ortho.Shape)
+	// Create position string for position-based metrics
+	positionStr := fmt.Sprintf("%v", ortho.Position)
 
 	// Record that we processed a search for this shape
 	searchesByShape.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("shape", shapeStr),
 	))
+	// Also record with position information
+	searchesByShapePosition.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("shape", shapeStr),
+		attribute.String("position", positionStr),
+	))
+	// Add it to Prometheus as well
+	prometheusSearchesByShapePosition.WithLabelValues(shapeStr, positionStr).Inc()
 
 	// Get forbidden and required values directly - no conversion needed
 	forbidden, required := GetRequirements(ortho)
@@ -101,15 +141,32 @@ func ProcessWorkItem(
 		searchSuccessByShape.Add(ctx, 1.0, metric.WithAttributes(
 			attribute.String("shape", shapeStr),
 		))
+		// Also record with position information
+		searchSuccessByShapePosition.Add(ctx, 1.0, metric.WithAttributes(
+			attribute.String("shape", shapeStr),
+			attribute.String("position", positionStr),
+		))
+		// Add it to Prometheus as well
+		prometheusSearchSuccessByShapePosition.WithLabelValues(shapeStr, positionStr).Inc()
 
 		// Record the total number of items found for this search
 		itemsFoundByShape.Add(ctx, float64(len(newOrthos)), metric.WithAttributes(
 			attribute.String("shape", shapeStr),
 		))
+		// Also record with position information
+		itemsFoundByShapePosition.Add(ctx, float64(len(newOrthos)), metric.WithAttributes(
+			attribute.String("shape", shapeStr),
+			attribute.String("position", positionStr),
+		))
 	} else {
 		// Record a search with zero items found (still counts as a search)
 		itemsFoundByShape.Add(ctx, 0.0, metric.WithAttributes(
 			attribute.String("shape", shapeStr),
+		))
+		// Also record with position information
+		itemsFoundByShapePosition.Add(ctx, 0.0, metric.WithAttributes(
+			attribute.String("shape", shapeStr),
+			attribute.String("position", positionStr),
 		))
 	}
 
@@ -588,6 +645,34 @@ func main() {
 	)
 	if err2 != nil {
 		log.Fatalf("Failed to create items found metric: %v", err2)
+	}
+
+	// Initialize new metrics for shape and position
+	searchesByShapePosition, err2 = meter.Int64Counter(
+		"ortho_searches_by_shape_position",
+		metric.WithDescription("Total number of searches processed by input ortho shape and position"),
+		metric.WithUnit("{search}"),
+	)
+	if err2 != nil {
+		log.Fatalf("Failed to create searches by shape and position metric: %v", err2)
+	}
+
+	searchSuccessByShapePosition, err2 = meter.Float64Counter(
+		"ortho_search_success_by_shape_position",
+		metric.WithDescription("Number of searches that found at least one item by input ortho shape and position"),
+		metric.WithUnit("{success}"),
+	)
+	if err2 != nil {
+		log.Fatalf("Failed to create search success by shape and position metric: %v", err2)
+	}
+
+	itemsFoundByShapePosition, err2 = meter.Float64Counter(
+		"ortho_items_found_by_shape_position",
+		metric.WithDescription("Total count of items found in searches by input ortho shape and position"),
+		metric.WithUnit("{item}"),
+	)
+	if err2 != nil {
+		log.Fatalf("Failed to create items found by shape and position metric: %v", err2)
 	}
 
 	// Set the global TextMapPropagator for OpenTelemetry

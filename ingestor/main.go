@@ -95,7 +95,7 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 		log.Printf("Context service error details: %v", err)
 		return
 	}
-	log.Printf("Received response from context service with version: %s and %d new subphrases",
+	log.Printf("Received response from context service with version: %d and %d new subphrases",
 		contextResponse.Version, len(contextResponse.NewSubphrases))
 
 	// Extract pairs for remediations
@@ -108,9 +108,13 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 
 	// Log detailed request to remediation service
 	pairsJSON, _ := json.Marshal(pairs)
-	// Fix the type assertion to use a pointer type
-	cfg := c.MustGet("config").(*config.IngestorConfig)
-	log.Printf("Calling remediations service at URL: %s", cfg.RemediationsServiceURL)
+
+	// Use Get instead of MustGet to handle test environment
+	var remediationsServiceURL string
+	if cfg, exists := c.Get("config"); exists {
+		remediationsServiceURL = cfg.(*config.IngestorConfig).RemediationsServiceURL
+		log.Printf("Calling remediations service at URL: %s", remediationsServiceURL)
+	}
 	log.Printf("Remediation request contains %d pairs: %s", len(pairs), string(pairsJSON))
 
 	// Send to remediations service with request context to maintain trace

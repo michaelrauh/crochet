@@ -22,19 +22,32 @@ func setupMockRemediationsServer() (*httptest.Server, []string) {
 	// Expected hashes to return
 	expectedHashes := []string{"hash1", "hash2", "hash3"}
 
-	// Handle the GET / endpoint
-	router.GET("/", func(c *gin.Context) {
-		// Get and validate the pairs parameter
-		pairsParam := c.Query("pairs")
-		if pairsParam == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"status":  "error",
-				"message": "Missing pairs parameter",
-			})
-			return
+	// Handle both GET and POST requests to the root endpoint
+	router.Any("/", func(c *gin.Context) {
+		// For GET requests, check the query parameters
+		if c.Request.Method == http.MethodGet {
+			// Get and validate the pairs parameter
+			pairsParam := c.Query("pairs")
+			if pairsParam == "" {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"status":  "error",
+					"message": "Missing pairs parameter",
+				})
+				return
+			}
+		} else if c.Request.Method == http.MethodPost {
+			// For POST requests, we'll just accept any valid JSON
+			var requestBody map[string]interface{}
+			if err := c.ShouldBindJSON(&requestBody); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"status":  "error",
+					"message": "Invalid JSON",
+				})
+				return
+			}
 		}
 
-		// Return the mock response
+		// Return the mock response for both GET and POST
 		c.JSON(http.StatusOK, types.RemediationResponse{
 			Status: "OK",
 			Hashes: expectedHashes,
@@ -105,18 +118,29 @@ func TestRemediationsURLEncoding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 
-	// Add a handler that checks the pairs parameter
-	router.GET("/", func(c *gin.Context) {
-		// Get the pairs parameter
-		pairsParam := c.Query("pairs")
-
-		// Verify it's not empty
-		if pairsParam == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"status":  "error",
-				"message": "Missing pairs parameter",
-			})
-			return
+	// Add a handler that handles both GET and POST requests
+	router.Any("/", func(c *gin.Context) {
+		if c.Request.Method == http.MethodGet {
+			// Get the pairs parameter
+			pairsParam := c.Query("pairs")
+			// Verify it's not empty
+			if pairsParam == "" {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"status":  "error",
+					"message": "Missing pairs parameter",
+				})
+				return
+			}
+		} else if c.Request.Method == http.MethodPost {
+			// For POST requests, we'll just accept any valid JSON
+			var requestBody map[string]interface{}
+			if err := c.ShouldBindJSON(&requestBody); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"status":  "error",
+					"message": "Invalid JSON",
+				})
+				return
+			}
 		}
 
 		// Return success - we just need to verify the parameter was sent

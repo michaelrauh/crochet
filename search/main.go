@@ -65,8 +65,8 @@ func ProcessWorkItem(
 
 	log.Printf("Processing work item with ID: %s", itemID)
 
-	// Create a shape string (e.g., "2x3") for the ortho
-	shapeStr := fmt.Sprintf("%dx%d", ortho.Shape[0], ortho.Shape[1])
+	// Use the string representation of the shape array as the shape label for metrics, to match other services
+	shapeStr := fmt.Sprintf("%v", ortho.Shape)
 
 	// Record that we processed a search for this shape
 	searchesByShape.Add(ctx, 1, metric.WithAttributes(
@@ -552,6 +552,11 @@ func main() {
 		"ortho_processing_duration_seconds_by_shape",
 		metric.WithDescription("Duration of ortho processing in seconds by shape"),
 		metric.WithUnit("s"),
+		// Add custom explicit bucket boundaries for more precise percentile calculations
+		metric.WithExplicitBucketBoundaries(
+			0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0,
+			1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0,
+		),
 	)
 	if err2 != nil {
 		log.Fatalf("Failed to create processing time metric: %v", err2)

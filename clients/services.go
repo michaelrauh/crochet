@@ -85,29 +85,63 @@ type RemediationsServiceClient struct {
 
 // FetchRemediations sends request to the remediations service and returns the response
 func (s *RemediationsServiceClient) FetchRemediations(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-	// Create the request body with the pairs
-	requestBody := map[string][][]string{
-		"pairs": request.Pairs,
+	// Convert pairs to a slice of RemediationTuple objects
+	remediationTuples := make([]types.RemediationTuple, len(request.Pairs))
+	for i, pair := range request.Pairs {
+		remediationTuples[i] = types.RemediationTuple{
+			Pair: pair,
+			Hash: "", // The server will generate a hash
+		}
 	}
 
 	// Marshal to JSON for the HTTP request body
-	requestJSON, err := json.Marshal(requestBody)
+	requestJSON, err := json.Marshal(remediationTuples)
 	if err != nil {
 		return types.RemediationResponse{}, fmt.Errorf("error marshaling remediation request: %w", err)
 	}
 
-	// Make POST request to the remediations service root endpoint
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL, requestJSON)
-	if serviceResp.Error != nil {
+	// Add detailed logging
+	log.Printf("DEBUG: Making request to remediations service at URL: %s%s", s.URL, "/remediations")
+	log.Printf("DEBUG: Request body: %s", string(requestJSON))
+
+	// Make POST request to the remediations service endpoint
+	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/remediations", requestJSON)
+
+	// The remediations service returns a 202 Accepted status code when the request is successfully accepted
+	// This should be treated as a success, not an error
+	if serviceResp.Error != nil && serviceResp.StatusCode != http.StatusAccepted {
+		log.Printf("ERROR: Remediations service call failed: %v", serviceResp.Error)
+		log.Printf("ERROR: Response status code: %d", serviceResp.StatusCode)
+		log.Printf("ERROR: Raw response: %v", serviceResp.RawResponse)
 		return types.RemediationResponse{}, fmt.Errorf("error calling remediations service: %w", serviceResp.Error)
 	}
 
-	log.Printf("Received remediations service raw response: %v", serviceResp.RawResponse)
+	log.Printf("DEBUG: Received remediations service raw response: %v", serviceResp.RawResponse)
+	log.Printf("DEBUG: Response status code: %d", serviceResp.StatusCode)
+
+	// For empty requests, the response may be empty or have a special structure
+	// Handle this case explicitly to avoid parsing errors
+	if len(request.Pairs) == 0 {
+		log.Printf("DEBUG: No pairs were sent to remediations service - returning empty response")
+		return types.RemediationResponse{
+			Status: "success",
+			Hashes: []string{},
+		}, nil
+	}
+
 	var response types.RemediationResponse
 	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
+		log.Printf("ERROR: Failed to parse remediations response: %v", err)
+		log.Printf("ERROR: Raw response for parsing error: %#v", serviceResp.RawResponse)
 		return types.RemediationResponse{}, fmt.Errorf("error parsing remediations response: %w", err)
 	}
 
+	// If Hashes is nil, initialize it to avoid nil pointer issues elsewhere
+	if response.Hashes == nil {
+		response.Hashes = []string{}
+	}
+
+	log.Printf("DEBUG: Successfully parsed remediations response with %d hashes", len(response.Hashes))
 	return response, nil
 }
 
@@ -142,24 +176,24 @@ func (s *RemediationsServiceClient) DeleteRemediations(ctx context.Context, hash
 
 // AddRemediations sends a request to add new remediations
 func (s *RemediationsServiceClient) AddRemediations(ctx context.Context, remediations []types.RemediationTuple) (types.AddRemediationResponse, error) {
-	// Create the request body with remediations to add
-	requestBody := map[string][]types.RemediationTuple{
-		"remediations": remediations,
-	}
-
-	// Marshal to JSON for the HTTP request
-	requestJSON, err := json.Marshal(requestBody)
+	// Marshal the remediations array directly to JSON for the HTTP request
+	requestJSON, err := json.Marshal(remediations)
 	if err != nil {
 		return types.AddRemediationResponse{}, fmt.Errorf("error marshaling add remediations request: %w", err)
 	}
 
-	// Make POST request to the remediations add endpoint
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/add", requestJSON)
-	if serviceResp.Error != nil {
+	// Make POST request to the remediations endpoint
+	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/remediations", requestJSON)
+
+	// The remediations service returns a 202 Accepted status code when the request is successfully accepted
+	// This should be treated as a success, not an error
+	if serviceResp.Error != nil && serviceResp.StatusCode != http.StatusAccepted {
+		log.Printf("ERROR: Remediations add service call failed: %v", serviceResp.Error)
+		log.Printf("ERROR: Response status code: %d", serviceResp.StatusCode)
 		return types.AddRemediationResponse{}, fmt.Errorf("error calling remediations add endpoint: %w", serviceResp.Error)
 	}
 
-	log.Printf("Received remediations add response: %v", serviceResp.RawResponse)
+	log.Printf("Response from service %s: %v", s.URL+"/remediations", serviceResp.RawResponse)
 
 	var response types.AddRemediationResponse
 	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {

@@ -95,11 +95,17 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 		log.Printf("Context service error details: %v", err)
 		return
 	}
+
+	// Add detailed logging for context response
+	contextRespJSON, _ := json.Marshal(contextResponse)
+	log.Printf("DEBUG: Full context service response: %s", string(contextRespJSON))
+
 	log.Printf("Received response from context service with version: %d and %d new subphrases",
 		contextResponse.Version, len(contextResponse.NewSubphrases))
 
 	// Extract pairs for remediations
 	pairs := types.ExtractPairsFromSubphrases(contextResponse.NewSubphrases)
+	log.Printf("DEBUG: Extracted pairs from subphrases: %v", pairs)
 	log.Printf("Extracted %d pairs from subphrases for remediation", len(pairs))
 
 	remediationReq := types.RemediationRequest{

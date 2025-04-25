@@ -20,6 +20,7 @@ RUN go mod tidy
 WORKDIR /app
 COPY remediations/go.mod .
 COPY remediations/main.go .
+COPY remediations/queue_store.go .
 
 # Install build dependencies
 RUN apk add --no-cache gcc musl-dev
@@ -47,7 +48,7 @@ RUN go get github.com/mitchellh/mapstructure
 RUN go mod tidy
 
 # Build the application with the production build tag
-RUN go build -tags=prod -o remediations main.go
+RUN go build -tags=prod -o remediations main.go queue_store.go
 
 FROM alpine:latest
 WORKDIR /root/

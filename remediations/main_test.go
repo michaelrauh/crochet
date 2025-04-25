@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
+	"strconv"
 	"testing"
+	"time"
 
 	"crochet/types"
 
@@ -15,11 +16,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func setupRouter() *gin.Engine {
+func setupRouter() (*gin.Engine, *RemediationQueueStore) {
 	gin.SetMode(gin.TestMode)
 	router := gin.Default()
 
-	initStore() // Initialize the store for testing
+	// Create a queue store with small values for testing
+	queueStore := NewRemediationQueueStore(100, 5, 10*time.Millisecond)
 
 	// Add some test data
 	testRemediations := []types.RemediationTuple{
@@ -29,302 +31,161 @@ func setupRouter() *gin.Engine {
 		{Pair: []string{"word1", "word2"}, Hash: "hash4"}, // Same pair, different hash
 	}
 
-	types.SaveRemediationsToStore(store, testRemediations)
-
-	router.GET("/", ginGetRemediationsHandler)
-	router.POST("/add", ginAddRemediationHandler)
-	router.POST("/delete", ginDeleteRemediationHandler)
-
-	return router
-}
-
-func TestGetRemediationsHandler(t *testing.T) {
-	router := setupRouter()
-
-	// Test cases
-	testCases := []struct {
-		name           string
-		pairs          [][]string
-		expectedStatus int
-		expectedHashes []string
-	}{
-		{
-			name:           "Find single hash",
-			pairs:          [][]string{{"word3", "word4"}},
-			expectedStatus: http.StatusOK,
-			expectedHashes: []string{"hash2"},
-		},
-		{
-			name:           "Find multiple hashes for the same pair",
-			pairs:          [][]string{{"word1", "word2"}},
-			expectedStatus: http.StatusOK,
-			expectedHashes: []string{"hash1", "hash4"},
-		},
-		{
-			name:           "Find hashes for multiple pairs",
-			pairs:          [][]string{{"word1", "word2"}, {"word3", "word4"}},
-			expectedStatus: http.StatusOK,
-			expectedHashes: []string{"hash1", "hash2", "hash4"},
-		},
-		{
-			name:           "No matches found",
-			pairs:          [][]string{{"nonexistent", "pair"}},
-			expectedStatus: http.StatusOK,
-			expectedHashes: []string{},
-		},
-		{
-			name:           "Empty pairs array",
-			pairs:          [][]string{},
-			expectedStatus: http.StatusOK,
-			expectedHashes: []string{},
-		},
+	// Add to queue
+	for _, r := range testRemediations {
+		queueStore.queue <- r
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Convert pairs to JSON
-			pairsJSON, _ := json.Marshal(tc.pairs)
+	// Give time for background flusher to process
+	time.Sleep(50 * time.Millisecond)
 
-			// URL encode the JSON
-			encodedPairs := url.QueryEscape(string(pairsJSON))
+	// Register the handlers
+	router.POST("/remediations", queueStore.AddHandler)
+	router.GET("/remediations", queueStore.GetHandler)
 
-			// Create request
-			req, _ := http.NewRequest("GET", "/?pairs="+encodedPairs, nil)
+	return router, queueStore
+}
+
+func TestRemediationEndpoints(t *testing.T) {
+	router, queueStore := setupRouter()
+
+	// Verify initial data was added correctly
+	queueStore.mu.RLock()
+	assert.Equal(t, 4, len(queueStore.store), "Should have 4 remediations in store")
+	queueStore.mu.RUnlock()
+
+	// Test GET remediations (all)
+	t.Run("Get all remediations", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/remediations", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response struct {
+			Status         string                   `json:"status"`
+			CurrentVersion int64                    `json:"current_version"`
+			Remediations   []types.RemediationTuple `json:"remediations"`
+		}
+		json.Unmarshal(w.Body.Bytes(), &response)
+
+		assert.Equal(t, "ok", response.Status)
+		assert.Equal(t, 4, len(response.Remediations), "Should have all 4 remediations")
+
+		// Save the current version for next test
+		currentVersion := response.CurrentVersion
+
+		// Test GET with since_version
+		t.Run("Get remediations since version", func(t *testing.T) {
+			// Add a new remediation to increment the version
+			newRemediation := types.RemediationTuple{
+				Pair: []string{"word7", "word8"},
+				Hash: "hash5",
+			}
+			queueStore.queue <- newRemediation
+
+			// Give time for background flusher to process
+			time.Sleep(50 * time.Millisecond)
+
+			// Get only remediations since our saved version
+			req, _ := http.NewRequest("GET", "/remediations?since_version="+strconv.FormatInt(currentVersion, 10), nil)
 			w := httptest.NewRecorder()
-
-			// Serve the request
 			router.ServeHTTP(w, req)
 
-			// Assert status code
-			assert.Equal(t, tc.expectedStatus, w.Code)
+			assert.Equal(t, http.StatusOK, w.Code)
 
-			// Parse response
-			var response types.RemediationResponse
+			var response struct {
+				Status         string                   `json:"status"`
+				CurrentVersion int64                    `json:"current_version"`
+				Remediations   []types.RemediationTuple `json:"remediations"`
+			}
 			json.Unmarshal(w.Body.Bytes(), &response)
 
-			// Check that all expected hashes are in the response (order doesn't matter)
-			assert.Equal(t, len(tc.expectedHashes), len(response.Hashes),
-				"Expected %d hashes but got %d", len(tc.expectedHashes), len(response.Hashes))
-
-			// Convert hashes to a map for easier comparison
-			expectedHashMap := make(map[string]struct{})
-			for _, hash := range tc.expectedHashes {
-				expectedHashMap[hash] = struct{}{}
-			}
-
-			// Check that all hashes in the response are expected
-			for _, hash := range response.Hashes {
-				_, exists := expectedHashMap[hash]
-				assert.True(t, exists, "Unexpected hash in response: %s", hash)
-			}
+			assert.Equal(t, "ok", response.Status)
+			assert.Equal(t, 1, len(response.Remediations), "Should have only the new remediation")
+			assert.Equal(t, "hash5", response.Remediations[0].Hash)
 		})
-	}
+	})
+
+	// Test POST to add new remediations
+	t.Run("Add remediations", func(t *testing.T) {
+		newRemediations := []types.RemediationTuple{
+			{Pair: []string{"word9", "word10"}, Hash: "hash6"},
+			{Pair: []string{"word11", "word12"}, Hash: "hash7"},
+		}
+
+		body, _ := json.Marshal(newRemediations)
+		req, _ := http.NewRequest("POST", "/remediations", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusAccepted, w.Code)
+
+		var response struct {
+			Status   string `json:"status"`
+			Enqueued int    `json:"enqueued"`
+		}
+		json.Unmarshal(w.Body.Bytes(), &response)
+
+		assert.Equal(t, "accepted", response.Status)
+		assert.Equal(t, 2, response.Enqueued)
+
+		// Sleep to allow the background flusher to process
+		time.Sleep(50 * time.Millisecond)
+
+		// Verify the store has been updated
+		queueStore.mu.RLock()
+		assert.Equal(t, 7, len(queueStore.store), "Should have 7 remediations in store")
+		queueStore.mu.RUnlock()
+	})
 }
 
-func TestGetRemediationsHandlerMissingPairsParam(t *testing.T) {
-	router := setupRouter()
+func TestRemediationDeduplicate(t *testing.T) {
+	router, queueStore := setupRouter()
 
-	// Create request with missing pairs parameter
-	req, _ := http.NewRequest("GET", "/", nil)
-	w := httptest.NewRecorder()
-
-	// Serve the request
-	router.ServeHTTP(w, req)
-
-	// Assert status code
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-
-	// Parse response
-	var response gin.H
-	json.Unmarshal(w.Body.Bytes(), &response)
-
-	// Check error message
-	assert.Equal(t, "error", response["status"])
-	assert.Equal(t, "Missing 'pairs' parameter", response["message"])
-}
-
-func TestGetRemediationsHandlerInvalidPairsFormat(t *testing.T) {
-	router := setupRouter()
-
-	// Create request with invalid pairs format
-	req, _ := http.NewRequest("GET", "/?pairs=invalid-json", nil)
-	w := httptest.NewRecorder()
-
-	// Serve the request
-	router.ServeHTTP(w, req)
-
-	// Assert status code
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-}
-
-func TestGinAddRemediationHandler(t *testing.T) {
-	router := setupRouter()
-
-	// Create a sample add remediation request with tuples
-	request := types.AddRemediationRequest{
-		Remediations: []types.RemediationTuple{
-			{
-				Pair: []string{"term1", "definition1"},
-				Hash: "hash5",
-			},
-			{
-				Pair: []string{"term2", "definition2"},
-				Hash: "hash6",
-			},
-		},
+	// Try to add duplicates of existing data
+	duplicates := []types.RemediationTuple{
+		{Pair: []string{"word1", "word2"}, Hash: "hash1"}, // Exact duplicate
+		{Pair: []string{"word3", "word4"}, Hash: "hash2"}, // Exact duplicate
 	}
 
-	jsonData, _ := json.Marshal(request)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/add", bytes.NewBuffer(jsonData))
+	body, _ := json.Marshal(duplicates)
+	req, _ := http.NewRequest("POST", "/remediations", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-
+	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// Check the response
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusAccepted, w.Code)
 
-	var response types.AddRemediationResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
+	// Sleep to allow the background flusher to process
+	time.Sleep(50 * time.Millisecond)
 
-	assert.Nil(t, err)
-	assert.Equal(t, "OK", response.Status)
-	assert.Equal(t, "Remediations added successfully", response.Message)
-
-	// Verify that the new items were added to the store (4 existing + 2 new)
-	assert.Equal(t, 6, len(store.Remediations))
+	// Verify store size hasn't changed (due to deduplication)
+	queueStore.mu.RLock()
+	assert.Equal(t, 4, len(queueStore.store), "Should still have 4 remediations (duplicates ignored)")
+	queueStore.mu.RUnlock()
 }
 
-func TestGinDeleteRemediationHandler(t *testing.T) {
-	router := setupRouter()
+func TestMalformedRequest(t *testing.T) {
+	router, _ := setupRouter()
 
-	// Create a sample delete remediation request
-	request := types.DeleteRemediationRequest{
-		Hashes: []string{"hash1", "hash3"}, // Delete two existing hashes
-	}
+	// Test invalid JSON in POST
+	t.Run("Invalid JSON POST", func(t *testing.T) {
+		req, _ := http.NewRequest("POST", "/remediations", bytes.NewBufferString("{invalid json}"))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
 
-	jsonData, _ := json.Marshal(request)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/delete", bytes.NewBuffer(jsonData))
-	req.Header.Set("Content-Type", "application/json")
+	// Test invalid since_version in GET
+	t.Run("Invalid since_version", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/remediations?since_version=not-a-number", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
 
-	router.ServeHTTP(w, req)
-
-	// Check the response
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var response types.DeleteRemediationResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-
-	assert.Nil(t, err)
-	assert.Equal(t, "OK", response.Status)
-	assert.Equal(t, "Remediations deleted successfully", response.Message)
-	assert.Equal(t, 2, response.Count) // 2 items should be deleted
-
-	// Verify that the items were removed from the store (4 existing - 2 deleted)
-	assert.Equal(t, 2, len(store.Remediations))
-
-	// Check which hashes remain
-	remainingHashes := make(map[string]struct{})
-	for _, remediation := range store.Remediations {
-		remainingHashes[remediation.Hash] = struct{}{}
-	}
-
-	// hash2 and hash4 should still be in the store
-	_, hash2Exists := remainingHashes["hash2"]
-	_, hash4Exists := remainingHashes["hash4"]
-	assert.True(t, hash2Exists, "hash2 should still exist in store")
-	assert.True(t, hash4Exists, "hash4 should still exist in store")
-
-	// hash1 and hash3 should have been deleted
-	_, hash1Exists := remainingHashes["hash1"]
-	_, hash3Exists := remainingHashes["hash3"]
-	assert.False(t, hash1Exists, "hash1 should have been deleted from store")
-	assert.False(t, hash3Exists, "hash3 should have been deleted from store")
-}
-
-func TestGinDeleteRemediationHandlerEmptyRequest(t *testing.T) {
-	router := setupRouter()
-
-	// Create a sample delete remediation request with no hashes
-	request := types.DeleteRemediationRequest{
-		Hashes: []string{},
-	}
-
-	jsonData, _ := json.Marshal(request)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/delete", bytes.NewBuffer(jsonData))
-	req.Header.Set("Content-Type", "application/json")
-
-	router.ServeHTTP(w, req)
-
-	// Check the response - should return a bad request
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-
-	var response gin.H
-	json.Unmarshal(w.Body.Bytes(), &response)
-
-	// Check error message
-	assert.Equal(t, "error", response["status"])
-	assert.Equal(t, "No hashes provided for deletion", response["message"])
-
-	// Verify that the store has not changed
-	assert.Equal(t, 4, len(store.Remediations))
-}
-
-func TestGinDeleteRemediationHandlerNonExistentHashes(t *testing.T) {
-	router := setupRouter()
-
-	// Create a request with hashes that don't exist in the store
-	request := types.DeleteRemediationRequest{
-		Hashes: []string{"nonexistent1", "nonexistent2"},
-	}
-
-	jsonData, _ := json.Marshal(request)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/delete", bytes.NewBuffer(jsonData))
-	req.Header.Set("Content-Type", "application/json")
-
-	router.ServeHTTP(w, req)
-
-	// Check the response
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var response types.DeleteRemediationResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-
-	assert.Nil(t, err)
-	assert.Equal(t, "OK", response.Status)
-	assert.Equal(t, "Remediations deleted successfully", response.Message)
-	assert.Equal(t, 0, response.Count) // No items should be deleted
-
-	// Verify that the store has not changed
-	assert.Equal(t, 4, len(store.Remediations))
-}
-
-func TestGinDeleteRemediationHandlerInvalidRequest(t *testing.T) {
-	router := setupRouter()
-
-	// Create a request with invalid JSON
-	invalidJSON := []byte(`{"hashes": [1, 2, 3]}`) // Hashes should be strings, not integers
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/delete", bytes.NewBuffer(invalidJSON))
-	req.Header.Set("Content-Type", "application/json")
-
-	router.ServeHTTP(w, req)
-
-	// Check the response
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-
-	var response gin.H
-	json.Unmarshal(w.Body.Bytes(), &response)
-
-	// Check error message
-	assert.Equal(t, "error", response["status"])
-	assert.Contains(t, response["message"].(string), "Invalid request format")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
 }

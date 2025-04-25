@@ -22,8 +22,8 @@ func setupMockRemediationsServer() (*httptest.Server, []string) {
 	// Expected hashes to return
 	expectedHashes := []string{"hash1", "hash2", "hash3"}
 
-	// Handle both GET and POST requests to the root endpoint
-	router.Any("/", func(c *gin.Context) {
+	// Handle both GET and POST requests to the /remediations endpoint
+	router.Any("/remediations", func(c *gin.Context) {
 		// For GET requests, check the query parameters
 		if c.Request.Method == http.MethodGet {
 			// Get and validate the pairs parameter
@@ -119,7 +119,7 @@ func TestRemediationsURLEncoding(t *testing.T) {
 	router := gin.New()
 
 	// Add a handler that handles both GET and POST requests
-	router.Any("/", func(c *gin.Context) {
+	router.Any("/remediations", func(c *gin.Context) {
 		if c.Request.Method == http.MethodGet {
 			// Get the pairs parameter
 			pairsParam := c.Query("pairs")

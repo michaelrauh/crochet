@@ -4,7 +4,6 @@ import (
 	"crochet/types"
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 	"time"
 )
@@ -101,12 +100,15 @@ func (q *WorkQueue) Ack(id string) bool {
 
 	for i, item := range q.items {
 		if item.ID == id && item.InProgress {
+			// Log the shape and position of the ortho being acknowledged
+			log.Printf("Acknowledging work item ID: %s, Shape: %v, Position: %v",
+				id, item.Ortho.Shape, item.Ortho.Position)
+
 			// Remove the item from the queue by swapping it with the last element
 			// and truncating the slice - more efficient than creating a new slice
 			lastIndex := len(q.items) - 1
 			q.items[i] = q.items[lastIndex]
 			q.items = q.items[:lastIndex]
-			log.Printf("Acknowledged and removed work item with ID: %s", id)
 			return true
 		}
 	}
@@ -122,9 +124,12 @@ func (q *WorkQueue) Nack(id string) bool {
 
 	for _, item := range q.items {
 		if item.ID == id && item.InProgress {
+			// Log the shape and position of the ortho being negative acknowledged
+			log.Printf("Negative acknowledging work item ID: %s, Shape: %v, Position: %v",
+				id, item.Ortho.Shape, item.Ortho.Position)
+
 			item.InProgress = false
 			item.DequeuedTime = nil
-			log.Printf("Negative acknowledged work item with ID: %s", id)
 			return true
 		}
 	}
@@ -140,20 +145,75 @@ func (q *WorkQueue) Count() int {
 	return len(q.items)
 }
 
+// CountQueued returns the count of items in the queue that are not in progress
+func (q *WorkQueue) CountQueued() int {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	count := 0
+	for _, item := range q.items {
+		if !item.InProgress {
+			count++
+		}
+	}
+	return count
+}
+
+// CountInFlight returns the count of items that are currently being processed
+func (q *WorkQueue) CountInFlight() int {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	count := 0
+	for _, item := range q.items {
+		if item.InProgress {
+			count++
+		}
+	}
+	return count
+}
+
 // CountByShape returns a map of shape to count of items with that shape
 func (q *WorkQueue) CountByShape() map[string]int {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
-
 	// Map to store counts by shape
 	shapeCounts := make(map[string]int)
-
 	for _, item := range q.items {
-		// Convert shape slice to string representation (e.g., "2x2", "3x3")
-		shape := fmt.Sprintf("%dx%d", item.Ortho.Shape[0], item.Ortho.Shape[1])
+		// Simply use the string representation of the shape array as the key
+		shape := fmt.Sprintf("%v", item.Ortho.Shape)
 		shapeCounts[shape]++
 	}
+	return shapeCounts
+}
 
+// CountQueuedByShape returns a map of shape to count of queued items (not in progress)
+func (q *WorkQueue) CountQueuedByShape() map[string]int {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	// Map to store counts by shape
+	shapeCounts := make(map[string]int)
+	for _, item := range q.items {
+		if !item.InProgress {
+			// Only count items that are not in progress
+			shape := fmt.Sprintf("%v", item.Ortho.Shape)
+			shapeCounts[shape]++
+		}
+	}
+	return shapeCounts
+}
+
+// CountInFlightByShape returns a map of shape to count of in-flight items
+func (q *WorkQueue) CountInFlightByShape() map[string]int {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	// Map to store counts by shape
+	shapeCounts := make(map[string]int)
+	for _, item := range q.items {
+		if item.InProgress {
+			// Only count items that are in progress
+			shape := fmt.Sprintf("%v", item.Ortho.Shape)
+			shapeCounts[shape]++
+		}
+	}
 	return shapeCounts
 }
 
@@ -164,14 +224,34 @@ func (q *WorkQueue) CountByShapeName(shapeName string) int {
 
 	count := 0
 	for _, item := range q.items {
-		// Convert shape slice to string representation (e.g., "2x2", "3x3")
-		shape := fmt.Sprintf("%dx%d", item.Ortho.Shape[0], item.Ortho.Shape[1])
-		// Normalize the shape name
-		shape = strings.ReplaceAll(shape, "×", "x")
+		// Use the consistent string representation of the shape array as the key
+		shape := fmt.Sprintf("%v", item.Ortho.Shape)
 		if shape == shapeName {
 			count++
 		}
 	}
 
 	return count
+}
+
+// CountQueuedByShapeAndPosition returns a map of shape+position to count of queued items
+func (q *WorkQueue) CountQueuedByShapeAndPosition() map[[2]string]int {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	locationCounts := make(map[[2]string]int)
+
+	for _, item := range q.items {
+		if !item.InProgress {
+			// Only count items that are not in progress
+			shapeKey := fmt.Sprintf("%v", item.Ortho.Shape)
+			posKey := fmt.Sprintf("%v", item.Ortho.Position)
+
+			// Create a composite key for shape+position
+			locationKey := [2]string{shapeKey, posKey}
+			locationCounts[locationKey]++
+		}
+	}
+
+	return locationCounts
 }

@@ -326,103 +326,25 @@
           "datasource": "Prometheus",
           "editorMode": "code",
           "expr": "workserver_queue_depth_total",
-          "legendFormat": "Total Queue Items",
+          "legendFormat": "Total Items (In Queue + In Flight)",
           "range": true,
           "refId": "A"
-        }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "normal"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 10
-              },
-              {
-                "color": "red",
-                "value": 50
-              }
-            ]
-          },
-          "unit": "short"
         },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 8
-      },
-      "id": 6,
-      "options": {
-        "legend": {
-          "calcs": ["mean", "max"],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "title": "Workserver Queue by Shape",
-      "type": "timeseries",
-      "targets": [
         {
           "datasource": "Prometheus",
           "editorMode": "code",
-          "expr": "workserver_queue_depth_shape{shape=~\".*\"}",
-          "legendFormat": "{{shape}}",
+          "expr": "workserver_queue_depth_queued",
+          "legendFormat": "Queued Items (Available for Processing)",
           "range": true,
-          "refId": "A"
+          "refId": "B"
+        },
+        {
+          "datasource": "Prometheus",
+          "editorMode": "code",
+          "expr": "workserver_queue_depth_in_flight",
+          "legendFormat": "In-Flight Items (Currently Processing)",
+          "range": true,
+          "refId": "C"
         }
       ]
     },
@@ -473,262 +395,19 @@
           "sort": "none"
         }
       },
-      "title": "Workserver Queue Items by Shape",
+      "title": "Workserver Queue Items by Shape×Position",
       "type": "piechart",
       "targets": [
         {
           "datasource": "Prometheus",
           "editorMode": "code",
-          "expr": "workserver_queue_depth_shape{shape=~\".*\"}",
-          "legendFormat": "{{shape}}",
+          "expr": "sum by(shape, position) (workserver_queue_depth_queued_shape_position)",
+          "legendFormat": "{{shape}} - {{position}}",
           "range": true,
           "refId": "A"
         }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 16
-      },
-      "id": 8,
-      "options": {
-        "legend": {
-          "calcs": ["mean", "max"],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "title": "Orthos Count",
-      "type": "timeseries",
-      "targets": [
-        {
-          "datasource": "Prometheus",
-          "editorMode": "code",
-          "expr": "orthos_total_count",
-          "legendFormat": "Total Orthos",
-          "range": true,
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "normal"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 10
-              },
-              {
-                "color": "red",
-                "value": 50
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 24
-      },
-      "id": 9,
-      "options": {
-        "legend": {
-          "calcs": ["mean", "max"],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "title": "Orthos Count by Shape",
-      "type": "timeseries",
-      "targets": [
-        {
-          "datasource": "Prometheus",
-          "editorMode": "code",
-          "expr": "orthos_count_by_shape{shape=~\".*\"}",
-          "legendFormat": "{{shape}}",
-          "range": true,
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
-          "mappings": []
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 24
-      },
-      "id": 10,
-      "options": {
-        "displayLabels": ["percent", "value"],
-        "legend": {
-          "displayMode": "list",
-          "placement": "right",
-          "showLegend": true,
-          "values": ["value", "percent"]
-        },
-        "pieType": "pie",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "title": "Orthos by Shape",
-      "type": "piechart",
-      "targets": [
-        {
-          "datasource": "Prometheus",
-          "editorMode": "code",
-          "expr": "orthos_count_by_shape{shape=~\".*\"}",
-          "legendFormat": "{{shape}}",
-          "range": true,
-          "refId": "A"
-        }
-      ]
+      ],
+      "description": "Shows the distribution of queued items by shape and position. Only includes items waiting to be processed (not in-flight)."
     },
     {
       "datasource": {
@@ -811,22 +490,22 @@
           "sort": "none"
         }
       },
-      "title": "Ortho Processing Time by Shape",
+      "title": "Ortho Processing Time by Shape×Position",
       "type": "timeseries",
       "targets": [
         {
           "datasource": "Prometheus",
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(crochet_ortho_processing_duration_seconds_by_shape_bucket[5m])) by (shape, le))",
-          "legendFormat": "{{shape}} (95%)",
+          "expr": "histogram_quantile(0.95, sum by(shape, position, le) (rate(crochet_ortho_processing_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{shape}} at {{position}} (95%)",
           "range": true,
           "refId": "A"
         },
         {
           "datasource": "Prometheus",
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum(rate(crochet_ortho_processing_duration_seconds_by_shape_bucket[5m])) by (shape, le))",
-          "legendFormat": "{{shape}} (median)",
+          "expr": "histogram_quantile(0.50, sum by(shape, position, le) (rate(crochet_ortho_processing_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{shape}} at {{position}} (median)",
           "range": true,
           "refId": "B"
         }
@@ -909,7 +588,7 @@
           "sort": "none"
         }
       },
-      "title": "Ortho Search Success Rate by Shape",
+      "title": "Ortho Search Success Rate by Shape×Position",
       "type": "timeseries",
       "targets": [
         {
@@ -999,7 +678,7 @@
           "sort": "none"
         }
       },
-      "title": "Ortho Items Found Per Search by Shape",
+      "title": "Ortho Items Found Per Search by Shape×Position",
       "type": "timeseries",
       "targets": [
         {
@@ -1099,8 +778,8 @@
         {
           "datasource": "Prometheus",
           "editorMode": "code",
-          "expr": "sum(workserver_queue_depth_shape) by (shape) * (sum(rate(crochet_ortho_items_found_by_shape_total[5m])) by (shape) / sum(rate(crochet_ortho_searches_by_shape_total[5m])) by (shape))",
-          "legendFormat": "{{shape}}",
+          "expr": "sum by(shape) (workserver_queue_depth_queued_shape * on(shape) group_right() (sum by(shape) (rate(crochet_ortho_items_found_by_shape_total[5m])) / sum by(shape) (rate(crochet_ortho_searches_by_shape_total[5m]))) * on(shape) group_left() (avg by(shape) (histogram_quantile(0.95, sum by(shape, le) (rate(crochet_ortho_processing_duration_seconds_bucket[15m]))))))",
+          "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
@@ -1166,7 +845,7 @@
         {
           "datasource": "Prometheus",
           "editorMode": "code",
-          "expr": "sum(sum(workserver_queue_depth_shape) by (shape) * (sum(rate(crochet_ortho_items_found_by_shape_total[5m])) by (shape) / sum(rate(crochet_ortho_searches_by_shape_total[5m])) by (shape)) * avg(histogram_quantile(0.95, sum(rate(crochet_ortho_processing_duration_seconds_by_shape_bucket[15m])) by (shape, le))) by (shape))",
+          "expr": "sum by(shape) (workserver_queue_depth_queued_shape * on(shape) group_right() (sum by(shape) (rate(crochet_ortho_items_found_by_shape_total[5m])) / sum by(shape) (rate(crochet_ortho_searches_by_shape_total[5m]))) * on(shape) group_left() (avg by(shape) (histogram_quantile(0.95, sum by(shape, le) (rate(crochet_ortho_processing_duration_seconds_bucket[15m]))))))",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -1262,6 +941,97 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "title": "Orthos Shape and Position Distribution",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "editorMode": "code",
+          "expr": "orthos_count_by_location{shape=~\".*\"}",
+          "legendFormat": "{{shape}} - {{position}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "description": "Tracks the number of orthos at specific positions within each shape."
     }
   ],
   "refresh": "5s",

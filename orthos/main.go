@@ -55,33 +55,49 @@ var (
 		},
 		[]string{"shape"},
 	)
+	orthosCountByLocation = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "orthos_count_by_location",
+			Help: "Number of orthos stored by location within shape",
+		},
+		[]string{"shape", "position"},
+	)
 )
 
 func init() {
 	// Register metrics with Prometheus
 	prometheus.MustRegister(orthosTotalCount)
 	prometheus.MustRegister(orthosCountByShape)
+	prometheus.MustRegister(orthosCountByLocation)
 }
 
 // updateOrthoMetrics updates the orthos metrics
 func updateOrthoMetrics(storage *OrthosStorage) {
-	// Get current orthos count by shape
-	shapeCounts := storage.CountOrthosByShape()
+	// Get current orthos count by shape and location
+	shapeCounts, locationCounts := storage.CountOrthosByShapeAndLocation()
 
 	// Set total count
 	totalCount := len(storage.orthos)
 	orthosTotalCount.Set(float64(totalCount))
 
-	// Reset shape metrics to avoid stale metrics
+	// Reset metrics to avoid stale metrics
 	orthosCountByShape.Reset()
+	orthosCountByLocation.Reset()
 
 	// Set shape-specific metrics
 	for shape, count := range shapeCounts {
 		orthosCountByShape.WithLabelValues(shape).Set(float64(count))
 	}
 
+	// Set location-specific metrics
+	for key, count := range locationCounts {
+		shape, position := key[0], key[1]
+		orthosCountByLocation.WithLabelValues(shape, position).Set(float64(count))
+	}
+
 	// Add more detailed logging
-	log.Printf("Updated orthos metrics: total=%d, shapes=%v", totalCount, shapeCounts)
+	log.Printf("Updated orthos metrics: total=%d, shapes=%d, locations=%d",
+		totalCount, len(shapeCounts), len(locationCounts))
 }
 
 // OrthosStorage provides thread-safe storage for orthos
@@ -101,18 +117,39 @@ func NewOrthosStorage() *OrthosStorage {
 func (s *OrthosStorage) CountOrthosByShape() map[string]int {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
+	shapeCounts := make(map[string]int)
+	for _, ortho := range s.orthos {
+		// Simply use the string representation of the shape array as the key
+		shapeKey := fmt.Sprintf("%v", ortho.Shape)
+		shapeCounts[shapeKey]++
+	}
+	log.Printf("CountOrthosByShape: counted %d different shapes from %d total orthos",
+		len(shapeCounts), len(s.orthos))
+	return shapeCounts
+}
+
+// CountOrthosByShapeAndLocation returns counts of orthos grouped by shape and by location within shape
+func (s *OrthosStorage) CountOrthosByShapeAndLocation() (map[string]int, map[[2]string]int) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
 
 	shapeCounts := make(map[string]int)
+	locationCounts := make(map[[2]string]int)
 
 	for _, ortho := range s.orthos {
-		if len(ortho.Shape) == 2 {
-			// Format shape as "NxM" where N and M are the dimensions
-			shapeKey := fmt.Sprintf("%dx%d", ortho.Shape[0], ortho.Shape[1])
-			shapeCounts[shapeKey]++
-		}
+		// Get the shape as a string
+		shapeKey := fmt.Sprintf("%v", ortho.Shape)
+		shapeCounts[shapeKey]++
+
+		// Get the position as a string
+		posKey := fmt.Sprintf("%v", ortho.Position)
+
+		// Create a composite key for shape+position
+		locationKey := [2]string{shapeKey, posKey}
+		locationCounts[locationKey]++
 	}
 
-	return shapeCounts
+	return shapeCounts, locationCounts
 }
 
 // AddOrthos adds multiple orthos to storage with thread safety and returns new IDs

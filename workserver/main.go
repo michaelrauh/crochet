@@ -31,7 +31,21 @@ var (
 		},
 	)
 
-	// Use a gauge vector instead of individual gauges for each shape
+	queueDepthQueued = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "workserver_queue_depth_queued",
+			Help: "Number of queued items waiting to be processed",
+		},
+	)
+
+	queueDepthInFlight = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "workserver_queue_depth_in_flight",
+			Help: "Number of items currently being processed",
+		},
+	)
+
+	// Use gauge vectors for shape-specific metrics
 	queueDepthByShape = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "workserver_queue_depth_shape",
@@ -39,12 +53,52 @@ var (
 		},
 		[]string{"shape"},
 	)
+
+	queueDepthQueuedByShape = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workserver_queue_depth_queued_shape",
+			Help: "Number of queued items waiting to be processed by shape",
+		},
+		[]string{"shape"},
+	)
+
+	queueDepthInFlightByShape = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workserver_queue_depth_in_flight_shape",
+			Help: "Number of items currently being processed by shape",
+		},
+		[]string{"shape"},
+	)
+
+	queueDepthQueuedByShapePosition = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workserver_queue_depth_queued_shape_position",
+			Help: "Number of queued items waiting to be processed by shape and position",
+		},
+		[]string{"shape", "position"},
+	)
+
+	// Add a new metric for tracking processing time by shape and position
+	orthoProcessingDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "crochet_ortho_processing_duration_seconds",
+			Help:    "Histogram of ortho processing duration in seconds",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+		},
+		[]string{"shape", "position"},
+	)
 )
 
 func init() {
 	// Register all metrics with Prometheus
 	prometheus.MustRegister(queueDepthTotal)
+	prometheus.MustRegister(queueDepthQueued)
+	prometheus.MustRegister(queueDepthInFlight)
 	prometheus.MustRegister(queueDepthByShape)
+	prometheus.MustRegister(queueDepthQueuedByShape)
+	prometheus.MustRegister(queueDepthInFlightByShape)
+	prometheus.MustRegister(queueDepthQueuedByShapePosition)
+	prometheus.MustRegister(orthoProcessingDuration)
 }
 
 // updateQueueMetrics periodically updates the queue metrics
@@ -55,21 +109,44 @@ func updateQueueMetrics() {
 	for {
 		select {
 		case <-ticker.C:
-			// Update total queue depth
+			// Update total queue depth metrics
 			queueDepthTotal.Set(float64(workQueue.Count()))
+			queueDepthQueued.Set(float64(workQueue.CountQueued()))
+			queueDepthInFlight.Set(float64(workQueue.CountInFlight()))
 
-			// Update shape-specific metrics
+			// Update shape-specific metrics for all items
 			shapeCounts := workQueue.CountByShape()
-
-			// Reset all shape gauges to avoid stale metrics
 			queueDepthByShape.Reset()
-
-			// Set metrics for all shapes in the queue
 			for shape, count := range shapeCounts {
 				queueDepthByShape.WithLabelValues(shape).Set(float64(count))
 			}
 
-			log.Printf("Updated metrics with queue data: %v", shapeCounts)
+			// Update shape-specific metrics for queued items
+			queuedShapeCounts := workQueue.CountQueuedByShape()
+			queueDepthQueuedByShape.Reset()
+			for shape, count := range queuedShapeCounts {
+				queueDepthQueuedByShape.WithLabelValues(shape).Set(float64(count))
+			}
+
+			// Update shape-specific metrics for in-flight items
+			inFlightShapeCounts := workQueue.CountInFlightByShape()
+			queueDepthInFlightByShape.Reset()
+			for shape, count := range inFlightShapeCounts {
+				queueDepthInFlightByShape.WithLabelValues(shape).Set(float64(count))
+			}
+
+			// Update shape+position metrics for queued items
+			queuedPositionCounts := workQueue.CountQueuedByShapeAndPosition()
+			queueDepthQueuedByShapePosition.Reset()
+			for key, count := range queuedPositionCounts {
+				shape, position := key[0], key[1]
+				log.Printf("Debug: Shape×Position metric: shape=%s, position=%s, count=%d",
+					shape, position, count)
+				queueDepthQueuedByShapePosition.WithLabelValues(shape, position).Set(float64(count))
+			}
+
+			log.Printf("Updated metrics: total=%d, queued=%d, in-flight=%d, shapes=%v",
+				workQueue.Count(), workQueue.CountQueued(), workQueue.CountInFlight(), shapeCounts)
 		}
 	}
 }

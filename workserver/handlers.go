@@ -2,8 +2,10 @@ package main
 
 import (
 	"crochet/telemetry"
+	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -91,6 +93,35 @@ func handleAck(c *gin.Context) {
 		return
 	}
 
+	// Get the work item before acknowledging it to log its details
+	var item *WorkItem
+	for _, wi := range workQueue.items {
+		if wi.ID == request.ID {
+			item = wi
+			break
+		}
+	}
+
+	// Log the details and record metrics before acknowledging
+	if item != nil {
+		log.Printf("Processing ack for item ID: %s, Shape: %v, Position: %v",
+			request.ID, item.Ortho.Shape, item.Ortho.Position)
+
+		// Calculate processing duration and record in Prometheus
+		if item.DequeuedTime != nil {
+			// Convert shape and position to string format for the metric labels
+			shapeStr := fmt.Sprintf("%v", item.Ortho.Shape)
+			positionStr := fmt.Sprintf("%v", item.Ortho.Position)
+
+			// Record the time from dequeue to ack as processing time
+			processingTime := time.Since(*item.DequeuedTime).Seconds()
+			orthoProcessingDuration.WithLabelValues(shapeStr, positionStr).Observe(processingTime)
+
+			log.Printf("Recorded processing time for shape=%s, position=%s: %.3f seconds",
+				shapeStr, positionStr, processingTime)
+		}
+	}
+
 	// Acknowledge the work item
 	success := workQueue.Ack(request.ID)
 
@@ -110,9 +141,9 @@ func handleAck(c *gin.Context) {
 
 // handleNack handles the nack endpoint to return work items to the queue
 func handleNack(c *gin.Context) {
-	var request AckRequest
+	var request AckRequest // Using AckRequest since the structure is the same
 
-	// Bind JSON to struct (reusing AckRequest since the structure is the same)
+	// Bind JSON to struct
 	if err := c.ShouldBindJSON(&request); err != nil {
 		telemetry.LogAndError(c, err, "workserver", "Error parsing nack request")
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -130,6 +161,21 @@ func handleNack(c *gin.Context) {
 			Message: "Empty work item ID is not valid",
 		})
 		return
+	}
+
+	// Get the work item before nacking it to log its details
+	var item *WorkItem
+	for _, wi := range workQueue.items {
+		if wi.ID == request.ID {
+			item = wi
+			break
+		}
+	}
+
+	// Log the details before nacking
+	if item != nil {
+		log.Printf("Processing nack for item ID: %s, Shape: %v, Position: %v",
+			request.ID, item.Ortho.Shape, item.Ortho.Position)
 	}
 
 	// Negative acknowledge the work item

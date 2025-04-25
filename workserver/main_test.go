@@ -44,14 +44,14 @@ func TestHandlePush(t *testing.T) {
 			name: "Push multiple orthos",
 			orthos: []types.Ortho{
 				{
-					Grid:     map[string]interface{}{"a": 1, "b": 2},
+					Grid:     map[string]string{"a": "1", "b": "2"},
 					Shape:    []int{3, 4},
 					Position: []int{5, 6},
 					Shell:    7,
 					ID:       "test-id-1",
 				},
 				{
-					Grid:     map[string]interface{}{"c": 3, "d": 4},
+					Grid:     map[string]string{"c": "3", "d": "4"},
 					Shape:    []int{7, 8},
 					Position: []int{9, 10},
 					Shell:    11,
@@ -111,14 +111,14 @@ func TestPopAckNack(t *testing.T) {
 	// Create test orthos
 	testOrthos := []types.Ortho{
 		{
-			Grid:     map[string]interface{}{"a": 1, "b": 2},
+			Grid:     map[string]string{"a": "1", "b": "2"},
 			Shape:    []int{3, 4},
 			Position: []int{5, 6},
 			Shell:    7,
 			ID:       "pop-test-id-1",
 		},
 		{
-			Grid:     map[string]interface{}{"c": 3, "d": 4},
+			Grid:     map[string]string{"c": "3", "d": "4"},
 			Shape:    []int{7, 8},
 			Position: []int{9, 10},
 			Shell:    11,
@@ -240,7 +240,7 @@ func TestRequeueTimeout(t *testing.T) {
 	// Create test ortho
 	testOrthos := []types.Ortho{
 		{
-			Grid:     map[string]interface{}{"a": 1, "b": 2},
+			Grid:     map[string]string{"a": "1", "b": "2"},
 			Shape:    []int{3, 4},
 			Position: []int{5, 6},
 			Shell:    7,

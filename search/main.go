@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -22,10 +23,15 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Global version tracking
-var currentVersion int
-var contextVocabulary []string
-var contextLines [][]string
+// Global state for search processing
+var searchState *State
+
+// State represents the current state of the search process
+type State struct {
+	Version    int                 // Current version
+	Vocabulary []string            // Available vocabulary
+	Pairs      map[string]struct{} // Tracked pairs
+}
 
 // Global metrics
 var processingTimeByShape metric.Float64Histogram
@@ -33,11 +39,8 @@ var searchSuccessByShape metric.Float64Counter
 var itemsFoundByShape metric.Float64Counter
 var searchesByShape metric.Int64Counter
 
-// Maximum number of orthos and remediations to generate for demonstration purposes
-const MAX_GENERATED_ITEMS = 5
-
-// processWorkItem handles a single work item according to the pattern in work.md
-func processWorkItem(
+// ProcessWorkItem handles a single work item according to the pattern in work.md
+func ProcessWorkItem(
 	ctx context.Context,
 	contextService types.ContextService,
 	orthosService types.OrthosService,
@@ -70,22 +73,37 @@ func processWorkItem(
 		attribute.String("shape", shapeStr),
 	))
 
-	// Add a span for generating random orthos
-	ctx, genOrthosSpan := tracer.Start(ctx, "generate_orthos")
-	generatedOrthos := generateRandomOrthos(ortho, rand.Intn(MAX_GENERATED_ITEMS))
-	genOrthosSpan.SetAttributes(attribute.Int("generated_count", len(generatedOrthos)))
-	genOrthosSpan.End()
-	log.Printf("Generated %d new orthos from input", len(generatedOrthos))
+	// Get forbidden and required values directly - no conversion needed
+	forbidden, required := GetRequirements(ortho)
+
+	// Convert forbidden to a map for filtering
+	forbiddenMap := make(map[string]struct{})
+	for _, word := range forbidden {
+		forbiddenMap[word] = struct{}{}
+	}
+
+	// Filter the vocabulary to exclude forbidden words
+	workingVocabulary := FilterVocabulary(searchState.Vocabulary, forbiddenMap)
+
+	// Generate candidates and remediations
+	candidates, remediations := GenerateCandidatesAndRemediations(workingVocabulary, required, searchState.Pairs, ortho)
+
+	// Generate new orthos from candidates
+	newOrthos := GenerateNewOrthos(candidates, ortho)
+
+	// Add a span for saving orthos
+	ctx, saveSpan := tracer.Start(ctx, "save_orthos")
+	saveSpan.SetAttributes(attribute.Int("orthos_count", len(newOrthos)))
 
 	// Record metrics for whether items were found and how many
-	if len(generatedOrthos) > 0 {
+	if len(newOrthos) > 0 {
 		// Record that the search was successful (found at least one item)
 		searchSuccessByShape.Add(ctx, 1.0, metric.WithAttributes(
 			attribute.String("shape", shapeStr),
 		))
 
 		// Record the total number of items found for this search
-		itemsFoundByShape.Add(ctx, float64(len(generatedOrthos)), metric.WithAttributes(
+		itemsFoundByShape.Add(ctx, float64(len(newOrthos)), metric.WithAttributes(
 			attribute.String("shape", shapeStr),
 		))
 	} else {
@@ -95,84 +113,56 @@ func processWorkItem(
 		))
 	}
 
-	// Add a span for generating random remediations
-	ctx, genRemSpan := tracer.Start(ctx, "generate_remediations")
-	generatedRemediations := generateRandomRemediations(rand.Intn(MAX_GENERATED_ITEMS))
-	genRemSpan.SetAttributes(attribute.Int("generated_count", len(generatedRemediations)))
-	genRemSpan.End()
-	log.Printf("Generated %d new remediations", len(generatedRemediations))
-
-	// Step 1: Add generated orthos to the database
-	if len(generatedOrthos) > 0 {
-		ctx, saveSpan := tracer.Start(ctx, "save_orthos")
-		saveSpan.SetAttributes(attribute.Int("orthos_count", len(generatedOrthos)))
-
-		orthosResp, err := orthosService.SaveOrthos(ctx, generatedOrthos)
+	// Step 1: Add new orthos to the database using SaveOrthos
+	if len(newOrthos) > 0 {
+		saveResponse, err := orthosService.SaveOrthos(ctx, newOrthos)
 		if err != nil {
 			saveSpan.RecordError(err)
 			saveSpan.End()
 			log.Printf("Error saving orthos: %v", err)
-			sendNack(ctx, workServerService, itemID, "Error saving orthos")
+			SendNack(ctx, workServerService, itemID, "Error saving orthos")
 			return
 		}
-
-		saveSpan.SetAttributes(attribute.Int("saved_count", orthosResp.Count))
-		saveSpan.End()
-		log.Printf("Added %d new orthos to database", orthosResp.Count)
-	} else {
-		// Add a span to show we're skipping this step
-		_, skipSpan := tracer.Start(ctx, "skip_save_orthos")
-		skipSpan.SetAttributes(attribute.String("reason", "no_orthos_to_save"))
-		skipSpan.End()
+		saveSpan.SetAttributes(attribute.Int("saved_count", saveResponse.Count))
+		log.Printf("Saved %d orthos", saveResponse.Count)
 	}
+	saveSpan.End()
 
-	// Step 2: Add generated remediations to the database
-	if len(generatedRemediations) > 0 {
-		ctx, addRemSpan := tracer.Start(ctx, "add_remediations")
-		addRemSpan.SetAttributes(attribute.Int("remediations_count", len(generatedRemediations)))
+	// Step 2: Add remediations to the database
+	ctx, addRemSpan := tracer.Start(ctx, "add_remediations")
+	addRemSpan.SetAttributes(attribute.Int("remediations_count", len(remediations)))
 
-		remediationsResp, err := remediationsService.AddRemediations(ctx, generatedRemediations)
+	if len(remediations) > 0 {
+		addResponse, err := remediationsService.AddRemediations(ctx, remediations)
 		if err != nil {
 			addRemSpan.RecordError(err)
 			addRemSpan.End()
 			log.Printf("Error adding remediations: %v", err)
-			sendNack(ctx, workServerService, itemID, "Error adding remediations")
+			SendNack(ctx, workServerService, itemID, "Error adding remediations")
 			return
 		}
-
-		addRemSpan.SetAttributes(attribute.Int("added_count", remediationsResp.Count))
-		addRemSpan.End()
-		log.Printf("Added %d new remediations to database", remediationsResp.Count)
-	} else {
-		// Add a span to show we're skipping this step
-		_, skipSpan := tracer.Start(ctx, "skip_add_remediations")
-		skipSpan.SetAttributes(attribute.String("reason", "no_remediations_to_add"))
-		skipSpan.End()
+		addRemSpan.SetAttributes(attribute.Int("added_count", addResponse.Count))
+		log.Printf("Added %d remediations", addResponse.Count)
 	}
+	addRemSpan.End()
 
-	// Step 3: Push new orthos to the queue
-	if len(generatedOrthos) > 0 {
-		ctx, pushSpan := tracer.Start(ctx, "push_orthos")
-		pushSpan.SetAttributes(attribute.Int("orthos_to_push", len(generatedOrthos)))
+	// Step 3: Push new orthos to the work server
+	ctx, pushSpan := tracer.Start(ctx, "push_orthos")
+	pushSpan.SetAttributes(attribute.Int("orthos_to_push", len(newOrthos)))
 
-		pushResp, err := workServerService.PushOrthos(ctx, generatedOrthos)
+	if len(newOrthos) > 0 {
+		pushResponse, err := workServerService.PushOrthos(ctx, newOrthos)
 		if err != nil {
 			pushSpan.RecordError(err)
 			pushSpan.End()
-			log.Printf("Error pushing orthos to queue: %v", err)
-			sendNack(ctx, workServerService, itemID, "Error pushing orthos to queue")
+			log.Printf("Error pushing orthos to work server: %v", err)
+			SendNack(ctx, workServerService, itemID, "Error pushing orthos to work server")
 			return
 		}
-
-		pushSpan.SetAttributes(attribute.Int("pushed_count", pushResp.Count))
-		pushSpan.End()
-		log.Printf("Pushed %d orthos to work queue", pushResp.Count)
-	} else {
-		// Add a span to show we're skipping this step
-		_, skipSpan := tracer.Start(ctx, "skip_push_orthos")
-		skipSpan.SetAttributes(attribute.String("reason", "no_orthos_to_push"))
-		skipSpan.End()
+		pushSpan.SetAttributes(attribute.Int("pushed_count", pushResponse.Count))
+		log.Printf("Pushed %d orthos to work server", pushResponse.Count)
 	}
+	pushSpan.End()
 
 	// Step 4: Check version again
 	ctx, verSpan := tracer.Start(ctx, "check_version")
@@ -181,32 +171,32 @@ func processWorkItem(
 		verSpan.RecordError(err)
 		verSpan.End()
 		log.Printf("Error checking context version: %v", err)
-		sendNack(ctx, workServerService, itemID, "Error checking context version")
+		SendNack(ctx, workServerService, itemID, "Error checking context version")
 		return
 	}
 	verSpan.SetAttributes(
-		attribute.Int("current_version", currentVersion),
+		attribute.Int("current_version", searchState.Version),
 		attribute.Int("service_version", versionResp.Version),
 	)
 	verSpan.End()
 
 	// Step 5: If version has changed, update context and NACK, otherwise ACK
-	if versionResp.Version != currentVersion {
+	if versionResp.Version != searchState.Version {
 		ctx, updateSpan := tracer.Start(ctx, "update_context")
 		updateSpan.SetAttributes(
-			attribute.Int("old_version", currentVersion),
+			attribute.Int("old_version", searchState.Version),
 			attribute.Int("new_version", versionResp.Version),
 		)
 
 		log.Printf("Context version changed from %d to %d, updating context",
-			currentVersion, versionResp.Version)
+			searchState.Version, versionResp.Version)
 
 		// Update our context data
-		if err := updateContextData(ctx, contextService); err != nil {
+		if err := UpdateContextData(ctx, contextService); err != nil {
 			updateSpan.RecordError(err)
 			updateSpan.End()
 			log.Printf("Error updating context data: %v", err)
-			sendNack(ctx, workServerService, itemID, "Error updating context data")
+			SendNack(ctx, workServerService, itemID, "Error updating context data")
 			return
 		}
 
@@ -215,7 +205,7 @@ func processWorkItem(
 		// NACK the work item to reprocess with the new context
 		ctx, nackSpan := tracer.Start(ctx, "nack_version_changed")
 		nackSpan.SetAttributes(attribute.String("reason", "context_version_changed"))
-		sendNackWithSpan(ctx, workServerService, itemID, "Context version changed", nackSpan)
+		SendNackWithSpan(ctx, workServerService, itemID, "Context version changed", nackSpan)
 		return
 	}
 
@@ -226,7 +216,7 @@ func processWorkItem(
 		ackSpan.RecordError(err)
 		ackSpan.End()
 		log.Printf("Error sending ACK: %v", err)
-		sendNack(ctx, workServerService, itemID, "Error sending ACK")
+		SendNack(ctx, workServerService, itemID, "Error sending ACK")
 		return
 	}
 	ackSpan.SetAttributes(attribute.String("ack_status", ackResp.Status))
@@ -245,8 +235,8 @@ func processWorkItem(
 	log.Printf("Recorded processing time for ortho shape %s: %.3f seconds", shapeStr, processingTime)
 }
 
-// sendNack is a helper function to send a NACK with error logging
-func sendNack(_ context.Context, workServerService types.WorkServerService, itemID, reason string) {
+// SendNack is a helper function to send a NACK with error logging
+func SendNack(_ context.Context, workServerService types.WorkServerService, itemID, reason string) {
 	log.Printf("Sending NACK for work item %s. Reason: %s", itemID, reason)
 	ackResp, err := workServerService.Nack(context.Background(), itemID)
 	if err != nil {
@@ -256,8 +246,8 @@ func sendNack(_ context.Context, workServerService types.WorkServerService, item
 	log.Printf("Sent NACK for work item: %s, response: %s", itemID, ackResp.Status)
 }
 
-// sendNackWithSpan is a helper function to send a NACK with error logging and tracing
-func sendNackWithSpan(_ context.Context, workServerService types.WorkServerService, itemID, reason string, span trace.Span) {
+// SendNackWithSpan is a helper function to send a NACK with error logging and tracing
+func SendNackWithSpan(_ context.Context, workServerService types.WorkServerService, itemID, reason string, span trace.Span) {
 	log.Printf("Sending NACK for work item %s. Reason: %s", itemID, reason)
 	ackResp, err := workServerService.Nack(context.Background(), itemID)
 	if err != nil {
@@ -271,8 +261,8 @@ func sendNackWithSpan(_ context.Context, workServerService types.WorkServerServi
 	log.Printf("Sent NACK for work item: %s, response: %s", itemID, ackResp.Status)
 }
 
-// updateContextData fetches the latest context data from context service
-func updateContextData(ctx context.Context, contextService types.ContextService) error {
+// UpdateContextData fetches the latest context data from context service
+func UpdateContextData(ctx context.Context, contextService types.ContextService) error {
 	versionResp, err := contextService.GetVersion(ctx)
 	if err != nil {
 		return err
@@ -283,69 +273,102 @@ func updateContextData(ctx context.Context, contextService types.ContextService)
 		return err
 	}
 
-	// Update global state
-	currentVersion = versionResp.Version
-	contextVocabulary = contextResp.Vocabulary
-	contextLines = contextResp.Lines
+	// Initialize the state if it doesn't exist
+	if searchState == nil {
+		searchState = &State{
+			Pairs: make(map[string]struct{}),
+		}
+	}
+
+	// Update search state
+	searchState.Version = versionResp.Version
+	searchState.Vocabulary = contextResp.Vocabulary
+
+	// Update pairs from context lines
+	for _, line := range contextResp.Lines {
+		key := strings.Join(line, ",")
+		searchState.Pairs[key] = struct{}{}
+	}
 
 	log.Printf("Updated context to version %d with %d vocabulary terms and %d lines",
-		currentVersion, len(contextVocabulary), len(contextLines))
+		versionResp.Version, len(searchState.Vocabulary), len(contextResp.Lines))
 
 	return nil
 }
 
-// generateRandomOrthos creates random orthos for demonstration
-func generateRandomOrthos(baseOrtho types.Ortho, count int) []types.Ortho {
-	orthos := make([]types.Ortho, count)
-	for i := 0; i < count; i++ {
-		orthos[i] = types.Ortho{
-			ID:       generateRandomID("ortho"), // Always generate a random ID
-			Shape:    []int{rand.Intn(5) + 1, rand.Intn(5) + 1},
-			Position: []int{rand.Intn(10), rand.Intn(10)},
-			Shell:    rand.Intn(3) + 1,
-			Grid:     map[string]interface{}{"x": rand.Intn(100), "y": rand.Intn(100)},
+// FilterVocabulary filters out forbidden words from the vocabulary.
+func FilterVocabulary(vocabulary []string, forbidden map[string]struct{}) []string {
+	filtered := []string{}
+	for _, word := range vocabulary {
+		if _, exists := forbidden[word]; !exists {
+			filtered = append(filtered, word)
 		}
 	}
-	return orthos
+	return filtered
 }
 
-// generateRandomRemediations creates random remediations for demonstration
-func generateRandomRemediations(count int) []types.RemediationTuple {
-	remediations := make([]types.RemediationTuple, count)
-	for i := 0; i < count; i++ {
-		remediations[i] = types.RemediationTuple{
-			Pair: []string{
-				generateRandomWord(5 + rand.Intn(5)),
-				generateRandomWord(5 + rand.Intn(5)),
-			},
-			Hash: generateRandomID("hash"),
+// GenerateCandidatesAndRemediations generates candidates and remediations based on the vocabulary and requirements.
+func GenerateCandidatesAndRemediations(
+	workingVocabulary []string,
+	required [][]string,
+	pairs map[string]struct{},
+	top types.Ortho,
+) ([]string, []types.RemediationTuple) {
+	candidates := []string{}
+	remediations := []types.RemediationTuple{}
+
+	for _, word := range workingVocabulary {
+		missingRequired := FindMissingRequired(required, pairs, word)
+		if missingRequired != nil {
+			remediations = append(remediations, types.RemediationTuple{
+				Pair: append(missingRequired, word),
+				Hash: GenerateUniqueHash(append(missingRequired, word)),
+			})
+		} else {
+			candidates = append(candidates, word)
 		}
 	}
-	return remediations
+
+	return candidates, remediations
 }
 
-// generateRandomID creates a random ID with a prefix
-func generateRandomID(prefix string) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	result := make([]byte, 8)
-	for i := range result {
-		result[i] = charset[rand.Intn(len(charset))]
+// FindMissingRequired finds the first missing required pair for a given word.
+func FindMissingRequired(required [][]string, pairs map[string]struct{}, word string) []string {
+	for _, req := range required {
+		combined := append([]string{}, req...)
+		combined = append(combined, word)
+		key := strings.Join(combined, ",")
+		if _, exists := pairs[key]; !exists {
+			return req
+		}
 	}
-	return prefix + "-" + string(result)
+	return nil
 }
 
-// generateRandomWord creates a random word of the given length
-func generateRandomWord(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz"
-	result := make([]byte, length)
-	for i := range result {
-		result[i] = charset[rand.Intn(len(charset))]
+// GenerateNewOrthos generates new orthos from the candidates.
+func GenerateNewOrthos(candidates []string, parent types.Ortho) []types.Ortho {
+	// Create a counter for generating new orthos
+	counter := NewCounter()
+
+	// Generate new orthos using the Add function directly - no conversion needed
+	var result []types.Ortho
+
+	for _, word := range candidates {
+		// Generate internal orthos using Add function
+		newOrthos := Add(parent, word, counter)
+		result = append(result, newOrthos...)
 	}
-	return string(result)
+
+	return result
 }
 
-// startWorker begins the worker loop that processes items from the queue
-func startWorker(
+// GenerateUniqueHash generates a unique hash for a pair.
+func GenerateUniqueHash(pair []string) string {
+	return "hash-" + strings.Join(pair, "-")
+}
+
+// StartWorker begins the worker loop that processes items from the queue
+func StartWorker(
 	ctx context.Context,
 	contextService types.ContextService,
 	orthosService types.OrthosService,
@@ -361,7 +384,7 @@ func startWorker(
 
 	// Initialize the context on startup with a proper span
 	initCtx, initSpan := tracer.Start(workerCtx, "initialize_context")
-	if err := updateContextData(initCtx, contextService); err != nil {
+	if err := UpdateContextData(initCtx, contextService); err != nil {
 		log.Printf("Failed to initialize context data: %v", err)
 		initSpan.RecordError(err)
 		initSpan.End()
@@ -397,6 +420,8 @@ func startWorker(
 			popSpan.End()
 			waitSpan.End()
 			rootSpan.End()
+
+			// Apply cooldown after error
 			time.Sleep(5 * time.Second) // Wait a bit before trying again
 			continue
 		}
@@ -414,6 +439,8 @@ func startWorker(
 			waitSpan.SetAttributes(attribute.Bool("found_work", false))
 			waitSpan.End()
 			rootSpan.End()
+
+			// Apply cooldown when no work is available
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -428,6 +455,9 @@ func startWorker(
 			attribute.String("work_item.id", popResp.ID),
 			attribute.String("ortho.id", popResp.Ortho.ID),
 		)
+
+		// Track if we had an error during processing
+		hadProcessingError := false
 
 		// Use a panic handler to ensure trace completion
 		func() {
@@ -446,12 +476,15 @@ func startWorker(
 						nackSpan.RecordError(nackErr)
 					}
 					nackSpan.End()
+
+					// Mark that we had an error
+					hadProcessingError = true
 				}
 				processSpan.End()
 			}()
 
 			// Process the work item
-			processWorkItem(
+			ProcessWorkItem(
 				processCtx,
 				contextService,
 				orthosService,
@@ -462,16 +495,20 @@ func startWorker(
 			)
 		}()
 
-		// Add a small cooldown span to visualize the intentional delay
-		_, cooldownSpan := tracer.Start(rootCtx, "cooldown")
-		time.Sleep(500 * time.Millisecond) // Small cooldown between work items
-		cooldownSpan.End()
+		// Add a cooldown span and delay only if there was an error during processing
+		if hadProcessingError {
+			_, cooldownSpan := tracer.Start(rootCtx, "error_cooldown")
+			log.Println("Applying cooldown after processing error")
+			time.Sleep(500 * time.Millisecond) // Cooldown after error
+			cooldownSpan.End()
+		}
 
 		// End the root span for this cycle
 		rootSpan.End()
 	}
 }
 
+// main function starts the service
 func main() {
 	// Load configuration
 	var cfg config.SearchConfig
@@ -563,6 +600,13 @@ func main() {
 	remediationsService := clients.NewRemediationsService(cfg.RemediationsServiceURL, httpClient)
 	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, httpClient)
 
+	// Initialize searchState
+	searchState = &State{
+		Version:    0,
+		Vocabulary: []string{},
+		Pairs:      make(map[string]struct{}),
+	}
+
 	// Log the initialization of service
 	log.Printf("Search service initialized with the following service URLs:")
 	log.Printf("  Orthos: %s", cfg.OrthosServiceURL)
@@ -577,7 +621,7 @@ func main() {
 	workerCtx, cancelWorker := context.WithCancel(context.Background())
 	defer cancelWorker() // Ensure we stop the worker when the main function exits
 
-	go startWorker(
+	go StartWorker(
 		workerCtx,
 		contextService,
 		orthosService,

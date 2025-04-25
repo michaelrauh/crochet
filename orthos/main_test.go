@@ -40,14 +40,14 @@ func TestHandleOrthos(t *testing.T) {
 			name: "Add new orthos",
 			orthos: []Ortho{
 				{
-					Grid:     map[string]interface{}{"a": 1, "b": 2},
+					Grid:     map[string]string{"a": "1", "b": "2"},
 					Shape:    []int{3, 4},
 					Position: []int{5, 6},
 					Shell:    7,
 					ID:       "new-id-1",
 				},
 				{
-					Grid:     map[string]interface{}{"c": 3, "d": 4},
+					Grid:     map[string]string{"c": "3", "d": "4"},
 					Shape:    []int{7, 8},
 					Position: []int{9, 10},
 					Shell:    11,
@@ -61,14 +61,14 @@ func TestHandleOrthos(t *testing.T) {
 			name: "Add duplicate orthos",
 			orthos: []Ortho{
 				{
-					Grid:     map[string]interface{}{"a": 1, "b": 2},
+					Grid:     map[string]string{"a": "1", "b": "2"},
 					Shape:    []int{3, 4},
 					Position: []int{5, 6},
 					Shell:    7,
 					ID:       "new-id-1", // Same ID as previous test case
 				},
 				{
-					Grid:     map[string]interface{}{"e": 5, "f": 6},
+					Grid:     map[string]string{"e": "5", "f": "6"},
 					Shape:    []int{11, 12},
 					Position: []int{13, 14},
 					Shell:    15,
@@ -134,21 +134,21 @@ func TestHandleGetOrthosByIDs(t *testing.T) {
 	// Create some test orthos
 	testOrthos := []Ortho{
 		{
-			Grid:     map[string]interface{}{"a": 1, "b": 2},
+			Grid:     map[string]string{"a": "1", "b": "2"},
 			Shape:    []int{3, 4},
 			Position: []int{5, 6},
 			Shell:    7,
 			ID:       "test-id-1",
 		},
 		{
-			Grid:     map[string]interface{}{"c": 3, "d": 4},
+			Grid:     map[string]string{"c": "3", "d": "4"},
 			Shape:    []int{7, 8},
 			Position: []int{9, 10},
 			Shell:    11,
 			ID:       "test-id-2",
 		},
 		{
-			Grid:     map[string]interface{}{"e": 5, "f": 6},
+			Grid:     map[string]string{"e": "5", "f": "6"},
 			Shape:    []int{11, 12},
 			Position: []int{13, 14},
 			Shell:    15,

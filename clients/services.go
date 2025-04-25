@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 
 	"crochet/httpclient"
 	"crochet/types"
@@ -86,26 +85,24 @@ type RemediationsServiceClient struct {
 
 // FetchRemediations sends request to the remediations service and returns the response
 func (s *RemediationsServiceClient) FetchRemediations(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-	// Marshal pairs to JSON
-	pairsJSON, err := json.Marshal(request.Pairs)
-	if err != nil {
-		return types.RemediationResponse{}, fmt.Errorf("error marshaling pairs: %w", err)
+	// Create the request body with the pairs
+	requestBody := map[string][][]string{
+		"pairs": request.Pairs,
 	}
 
-	// URL encode the JSON for use in a query parameter
-	encodedPairs := url.QueryEscape(string(pairsJSON))
+	// Marshal to JSON for the HTTP request body
+	requestJSON, err := json.Marshal(requestBody)
+	if err != nil {
+		return types.RemediationResponse{}, fmt.Errorf("error marshaling remediation request: %w", err)
+	}
 
-	// Build the URL with the query parameter
-	requestURL := fmt.Sprintf("%s/?pairs=%s", s.URL, encodedPairs)
-
-	// Make GET request to the remediations service
-	serviceResp := s.Client.Call(ctx, http.MethodGet, requestURL, nil)
+	// Make POST request to the remediations service root endpoint
+	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL, requestJSON)
 	if serviceResp.Error != nil {
 		return types.RemediationResponse{}, fmt.Errorf("error calling remediations service: %w", serviceResp.Error)
 	}
 
 	log.Printf("Received remediations service raw response: %v", serviceResp.RawResponse)
-
 	var response types.RemediationResponse
 	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
 		return types.RemediationResponse{}, fmt.Errorf("error parsing remediations response: %w", err)
@@ -199,8 +196,9 @@ func (s *OrthosServiceClient) GetOrthosByIDs(ctx context.Context, ids []string) 
 
 	log.Printf("Received orthos service raw response: %v", serviceResp.RawResponse)
 
+	// Process the response manually to ensure grid values are strings
 	var response types.OrthosResponse
-	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
+	if err := mapResponseToOrthos(serviceResp.RawResponse, &response); err != nil {
 		return types.OrthosResponse{}, fmt.Errorf("error parsing orthos response: %w", err)
 	}
 
@@ -281,8 +279,9 @@ func (s *WorkServerServiceClient) Pop(ctx context.Context) (types.WorkServerPopR
 
 	log.Printf("Received work server pop response: %v", serviceResp.RawResponse)
 
+	// Process the response manually to handle the Ortho object correctly
 	var response types.WorkServerPopResponse
-	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
+	if err := mapResponseToWorkServerPop(serviceResp.RawResponse, &response); err != nil {
 		return types.WorkServerPopResponse{}, fmt.Errorf("error parsing work server pop response: %w", err)
 	}
 
@@ -441,6 +440,144 @@ func mapResponseToStruct(rawResponse map[string]interface{}, target interface{})
 
 	if err := json.Unmarshal(jsonData, target); err != nil {
 		return fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return nil
+}
+
+// mapResponseToOrthos is a specialized mapper for responses containing Ortho objects
+// that ensures the Grid field is properly converted to map[string]string
+func mapResponseToOrthos(rawResponse map[string]interface{}, response *types.OrthosResponse) error {
+	// Map the status, message, and count fields
+	if status, ok := rawResponse["status"].(string); ok {
+		response.Status = status
+	}
+	if message, ok := rawResponse["message"].(string); ok {
+		response.Message = message
+	}
+	if count, ok := rawResponse["count"].(float64); ok {
+		response.Count = int(count)
+	}
+
+	// Handle the orthos array
+	if orthosRaw, ok := rawResponse["orthos"].([]interface{}); ok {
+		response.Orthos = make([]types.Ortho, len(orthosRaw))
+
+		for i, orthoRaw := range orthosRaw {
+			if orthoMap, ok := orthoRaw.(map[string]interface{}); ok {
+				// Map the basic fields
+				if id, ok := orthoMap["id"].(string); ok {
+					response.Orthos[i].ID = id
+				}
+
+				if shapeRaw, ok := orthoMap["shape"].([]interface{}); ok {
+					response.Orthos[i].Shape = make([]int, len(shapeRaw))
+					for j, dim := range shapeRaw {
+						if dimFloat, ok := dim.(float64); ok {
+							response.Orthos[i].Shape[j] = int(dimFloat)
+						}
+					}
+				}
+
+				if posRaw, ok := orthoMap["position"].([]interface{}); ok {
+					response.Orthos[i].Position = make([]int, len(posRaw))
+					for j, pos := range posRaw {
+						if posFloat, ok := pos.(float64); ok {
+							response.Orthos[i].Position[j] = int(posFloat)
+						}
+					}
+				}
+
+				if shell, ok := orthoMap["shell"].(float64); ok {
+					response.Orthos[i].Shell = int(shell)
+				}
+
+				// Convert grid from map[string]interface{} to map[string]string
+				if gridRaw, ok := orthoMap["grid"].(map[string]interface{}); ok {
+					grid := make(map[string]string)
+					for k, v := range gridRaw {
+						if strVal, ok := v.(string); ok {
+							grid[k] = strVal
+						} else {
+							// Convert non-string values to strings
+							grid[k] = fmt.Sprintf("%v", v)
+						}
+					}
+					response.Orthos[i].Grid = grid
+				} else {
+					response.Orthos[i].Grid = make(map[string]string)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// mapResponseToWorkServerPop is a specialized mapper for work server pop responses
+// that ensures the Ortho object's Grid field is properly converted to map[string]string
+func mapResponseToWorkServerPop(rawResponse map[string]interface{}, response *types.WorkServerPopResponse) error {
+	// Map the status and message fields
+	if status, ok := rawResponse["status"].(string); ok {
+		response.Status = status
+	}
+	if message, ok := rawResponse["message"].(string); ok {
+		response.Message = message
+	}
+	if id, ok := rawResponse["id"].(string); ok {
+		response.ID = id
+	}
+
+	// Handle the ortho object if present
+	if orthoRaw, ok := rawResponse["ortho"].(map[string]interface{}); ok && orthoRaw != nil {
+		ortho := &types.Ortho{}
+
+		// Map the basic fields
+		if id, ok := orthoRaw["id"].(string); ok {
+			ortho.ID = id
+		}
+
+		if shapeRaw, ok := orthoRaw["shape"].([]interface{}); ok {
+			ortho.Shape = make([]int, len(shapeRaw))
+			for j, dim := range shapeRaw {
+				if dimFloat, ok := dim.(float64); ok {
+					ortho.Shape[j] = int(dimFloat)
+				}
+			}
+		}
+
+		if posRaw, ok := orthoRaw["position"].([]interface{}); ok {
+			ortho.Position = make([]int, len(posRaw))
+			for j, pos := range posRaw {
+				if posFloat, ok := pos.(float64); ok {
+					ortho.Position[j] = int(posFloat)
+				}
+			}
+		}
+
+		if shell, ok := orthoRaw["shell"].(float64); ok {
+			ortho.Shell = int(shell)
+		}
+
+		// Convert grid from map[string]interface{} to map[string]string
+		if gridRaw, ok := orthoRaw["grid"].(map[string]interface{}); ok {
+			grid := make(map[string]string)
+			for k, v := range gridRaw {
+				if strVal, ok := v.(string); ok {
+					grid[k] = strVal
+				} else {
+					// Convert non-string values to strings
+					grid[k] = fmt.Sprintf("%v", v)
+				}
+			}
+			ortho.Grid = grid
+		} else {
+			ortho.Grid = make(map[string]string)
+		}
+
+		response.Ortho = ortho
+	} else {
+		response.Ortho = nil
 	}
 
 	return nil

@@ -52,6 +52,8 @@ RUN go build -tags=prod -o remediations main.go
 FROM alpine:latest
 WORKDIR /root/
 COPY --from=builder /app/remediations .
+# Install curl for the health check
+RUN apk add --no-cache curl
 EXPOSE 8082
 ENV REMEDIATIONS_PORT=8082
 CMD ["./remediations"]

@@ -72,13 +72,13 @@ type DeleteRemediationResponse struct {
 	Count   int    `mapstructure:"count" json:"count"`
 }
 
-// Ortho represents orthogonal data structure from orthos service
+// Ortho represents orthogonal data structure
 type Ortho struct {
-	Grid     map[string]interface{} `mapstructure:"grid" json:"grid"`
-	Shape    []int                  `mapstructure:"shape" json:"shape"`
-	Position []int                  `mapstructure:"position" json:"position"`
-	Shell    int                    `mapstructure:"shell" json:"shell"`
-	ID       string                 `mapstructure:"id" json:"id"`
+	Grid     map[string]string `mapstructure:"grid" json:"grid"`
+	Shape    []int             `mapstructure:"shape" json:"shape"`
+	Position []int             `mapstructure:"position" json:"position"`
+	Shell    int               `mapstructure:"shell" json:"shell"`
+	ID       string            `mapstructure:"id" json:"id"`
 }
 
 // OrthosResponse represents the response from the orthos service

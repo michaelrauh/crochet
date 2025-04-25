@@ -82,13 +82,42 @@ func findHashesForPairs(pairs [][]string) []string {
 }
 
 func ginGetRemediationsHandler(c *gin.Context) {
-	// Use the new helper function to process remediation pairs
-	pairs, err := types.ProcessRemediationPairs(c, "remediations")
-	if err != nil {
-		// ProcessRemediationPairs already sets the appropriate error response
-		return
-	}
+	// Check if this is a GET or POST request
+	if c.Request.Method == http.MethodGet {
+		// Use the helper function to process remediation pairs from query parameters
+		pairs, err := types.ProcessRemediationPairs(c, "remediations")
+		if err != nil {
+			// ProcessRemediationPairs already sets the appropriate error response
+			return
+		}
 
+		handleRemediationPairs(c, pairs)
+	} else if c.Request.Method == http.MethodPost {
+		// For POST requests, parse pairs from the request body
+		var requestBody struct {
+			Pairs [][]string `json:"pairs"`
+		}
+
+		if err := c.ShouldBindJSON(&requestBody); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  "error",
+				"message": "Invalid request body",
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		handleRemediationPairs(c, requestBody.Pairs)
+	} else {
+		c.JSON(http.StatusMethodNotAllowed, gin.H{
+			"status":  "error",
+			"message": "Method not allowed",
+		})
+	}
+}
+
+// handleRemediationPairs processes the pairs and returns the response
+func handleRemediationPairs(c *gin.Context, pairs [][]string) {
 	pairs_count := len(pairs)
 	log.Printf("Received %d pairs for remediation lookup", pairs_count)
 
@@ -248,6 +277,7 @@ func main() {
 
 	// Register Gin routes
 	router.GET("/", ginGetRemediationsHandler)
+	router.POST("/", ginGetRemediationsHandler)
 	router.POST("/add", ginAddRemediationHandler)
 	router.POST("/delete", ginDeleteRemediationHandler)
 

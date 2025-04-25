@@ -17,10 +17,9 @@ RUN go mod download github.com/gin-gonic/gin
 RUN go mod download github.com/grafana/pyroscope-go
 RUN go mod tidy
 
-# Copy the search go.mod file
+# Copy all files from search directory
 WORKDIR /app
-COPY ./search/go.mod ./search/
-COPY ./search/main.go ./search/
+COPY ./search/ ./search/
 
 # Generate go.sum during the build process
 WORKDIR /app/search

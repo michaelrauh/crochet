@@ -23,11 +23,11 @@ type OrthosConfig struct {
 
 // Ortho represents the structure for orthogonal data
 type Ortho struct {
-	Grid     map[string]interface{} `json:"grid"`
-	Shape    []int                  `json:"shape"`
-	Position []int                  `json:"position"`
-	Shell    int                    `json:"shell"`
-	ID       string                 `json:"id"`
+	Grid     map[string]string `json:"grid"`
+	Shape    []int             `json:"shape"`
+	Position []int             `json:"position"`
+	Shell    int               `json:"shell"`
+	ID       string            `json:"id"`
 }
 
 // OrthosRequest represents a request containing multiple Ortho objects

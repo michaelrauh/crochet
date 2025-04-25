@@ -25,6 +25,13 @@ cd workserver
 go test -tags=test -v ./...
 cd ..
 
+# Run unit tests for the search service
+echo "Running unit tests for search service..."
+cd search
+# Change from ./... pattern to specific test files
+go test -tags=test -v .
+cd ..
+
 # Run unit tests for the clients package
 echo "Running unit tests for clients package..."
 cd clients

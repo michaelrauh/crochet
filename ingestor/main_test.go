@@ -229,7 +229,7 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 				Orthos: []types.Ortho{
 					{
 						ID:       "1234567890abcdef1234567890abcdef",
-						Grid:     map[string]interface{}{"a": 1, "b": 2},
+						Grid:     map[string]string{"0,0": "test1", "0,1": "test2"},
 						Shape:    []int{3, 4},
 						Position: []int{5, 6},
 						Shell:    7,
@@ -532,15 +532,16 @@ func TestConcurrentRequests(t *testing.T) {
 	mockOrthosService := &MockOrthosService{
 		GetOrthosByIDsFunc: func(ctx context.Context, ids []string) (types.OrthosResponse, error) {
 			return types.OrthosResponse{
-				Status: "success",
-				Count:  1,
+				Status:  "success",
+				Message: "Orthos retrieved successfully",
+				Count:   1,
 				Orthos: []types.Ortho{
 					{
-						ID:       "1234567890abcdef1234567890abcdef",
-						Grid:     map[string]interface{}{"a": 1, "b": 2},
-						Shape:    []int{3, 4},
-						Position: []int{5, 6},
-						Shell:    7,
+						Grid:     map[string]string{"0,0": "test1", "0,1": "test2"},
+						Shape:    []int{2, 2},
+						Position: []int{0, 0},
+						Shell:    0,
+						ID:       "test-ortho-id",
 					},
 				},
 			}, nil

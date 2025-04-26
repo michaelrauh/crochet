@@ -122,23 +122,25 @@ func (s *RemediationQueueStore) AddHandler(c *gin.Context) {
 		return
 	}
 
-	// Enqueue all incoming remediations
-	// This should never block due to channel buffering
-	enqueuedCount := 0
-	for _, r := range incoming {
-		select {
-		case s.queue <- r:
-			enqueuedCount++
-		default:
-			// Queue is full, this shouldn't happen with proper sizing
-			// We could log this condition, but we'll just continue
-		}
-	}
-
+	// Respond immediately to the client
+	count := len(incoming)
 	c.JSON(http.StatusAccepted, gin.H{
 		"status":   "accepted",
-		"enqueued": enqueuedCount,
+		"enqueued": count,
 	})
+
+	// Process the remediations asynchronously
+	go func(items []types.RemediationTuple) {
+		for _, r := range items {
+			select {
+			case s.queue <- r:
+				// Successfully enqueued
+			default:
+				// Queue is full, this shouldn't happen with proper sizing
+				// We could log this condition, but we'll just continue
+			}
+		}
+	}(incoming)
 }
 
 // GetHandler handles HTTP GET requests to retrieve remediations

@@ -121,14 +121,6 @@ func init() {
 	prometheus.MustRegister(itemsProcessedTotal)
 }
 
-// helper function for our sample in flight endpoint
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // updateQueueMetrics periodically updates the queue metrics
 func updateQueueMetrics() {
 	ticker := time.NewTicker(5 * time.Second)

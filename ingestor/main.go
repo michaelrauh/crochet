@@ -13,6 +13,7 @@ import (
 
 	"crochet/clients"
 	"crochet/config"
+	"crochet/health"
 	"crochet/httpclient"
 	"crochet/middleware"
 	"crochet/telemetry"
@@ -54,6 +55,15 @@ func createNewOrtho() types.Ortho {
 		Shell:    0,
 		ID:       GenerateID(),
 	}
+}
+
+// healthHandler returns a simple health response
+func healthHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"status":    "ok",
+		"service":   "ingestor",
+		"timestamp": time.Now().Format(time.RFC3339),
+	})
 }
 
 func ginHandleTextInput(c *gin.Context, contextService types.ContextService, remediationsService types.RemediationsService, orthosService types.OrthosService, workServerService types.WorkServerService) {
@@ -270,6 +280,18 @@ func main() {
 		c.Request = c.Request.WithContext(ctxWithConfig)
 		ginHandleTextInput(c, contextService, remediationsService, orthosService, workServerService)
 	})
+
+	// Set up health check
+	healthCheck := health.New(health.Options{
+		ServiceName: cfg.ServiceName,
+		Version:     "1.0.0",
+		Details: map[string]string{
+			"description": "Ingests text data into the Crochet system",
+		},
+	})
+
+	// Register health check handler in the gin router
+	router.GET("/health", gin.WrapF(healthCheck.Handler()))
 
 	// Start the server
 	address := cfg.GetAddress()

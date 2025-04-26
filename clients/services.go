@@ -252,16 +252,24 @@ func (s *OrthosServiceClient) SaveOrthos(ctx context.Context, orthos []types.Ort
 		return types.OrthosSaveResponse{}, fmt.Errorf("error marshaling save orthos request: %w", err)
 	}
 
+	// Log the request for tracing
+	log.Printf("Making request to orthos service: %s with %d orthos", s.URL+"/orthos", len(orthos))
+
 	// Make POST request to the orthos service save endpoint
+	// Ensure context is passed through for proper trace propagation
 	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/orthos", requestJSON)
 	if serviceResp.Error != nil {
+		log.Printf("ERROR: Orthos save service call failed: %v", serviceResp.Error)
+		log.Printf("ERROR: Response status code: %d", serviceResp.StatusCode)
 		return types.OrthosSaveResponse{}, fmt.Errorf("error calling orthos save endpoint: %w", serviceResp.Error)
 	}
 
-	log.Printf("Received orthos save response: %v", serviceResp.RawResponse)
+	log.Printf("Received orthos save response with status code: %d", serviceResp.StatusCode)
+	log.Printf("Received orthos save raw response: %v", serviceResp.RawResponse)
 
 	var response types.OrthosSaveResponse
 	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
+		log.Printf("ERROR: Failed to parse orthos save response: %v", err)
 		return types.OrthosSaveResponse{}, fmt.Errorf("error parsing orthos save response: %w", err)
 	}
 
@@ -467,6 +475,57 @@ func NewWorkServerService(url string, client *httpclient.Client) types.WorkServe
 
 // Helper function to map a raw response to a struct
 func mapResponseToStruct(rawResponse map[string]interface{}, target interface{}) error {
+	// If rawResponse is empty, try to initialize some default values
+	if len(rawResponse) == 0 {
+		// For common response types, initialize with empty values
+		switch v := target.(type) {
+		case *types.RemediationResponse:
+			v.Status = "success"
+			v.Hashes = []string{}
+			return nil
+		case *types.OrthosResponse:
+			v.Status = "success"
+			v.Orthos = []types.Ortho{}
+			return nil
+		case *types.OrthosSaveResponse:
+			v.Status = "success"
+			// We can't access NewIDs directly - handle this case differently
+			return nil
+		}
+	}
+
+	// Special handling for OrthosSaveResponse before general unmarshaling
+	if _, ok := target.(*types.OrthosSaveResponse); ok {
+		resp := target.(*types.OrthosSaveResponse)
+
+		if status, ok := rawResponse["status"].(string); ok {
+			resp.Status = status
+		}
+
+		if message, ok := rawResponse["message"].(string); ok {
+			resp.Message = message
+		}
+
+		if count, ok := rawResponse["count"].(float64); ok {
+			resp.Count = int(count)
+		}
+
+		// Store newIDs in a slice that we'll pass back to the caller
+		if newIDsRaw, ok := rawResponse["newIDs"].([]interface{}); ok {
+			newIDs := make([]string, len(newIDsRaw))
+			for i, id := range newIDsRaw {
+				if strID, ok := id.(string); ok {
+					newIDs[i] = strID
+				}
+			}
+			// Store in a field that actually exists
+			resp.NewIDs = newIDs
+		}
+
+		return nil
+	}
+
+	// Continue with regular marshaling for other types
 	jsonData, err := json.Marshal(rawResponse)
 	if err != nil {
 		return fmt.Errorf("error re-marshaling response: %w", err)

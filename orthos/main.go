@@ -19,6 +19,8 @@ import (
 // OrthosConfig holds configuration specific to the orthos server
 type OrthosConfig struct {
 	config.BaseConfig
+	QueueFlushInterval int `env:"QUEUE_FLUSH_INTERVAL" envDefault:"15"` // Seconds between queue flushes
+	QueueBatchSize     int `env:"QUEUE_BATCH_SIZE" envDefault:"100"`    // Number of items to process in a batch
 }
 
 // Ortho represents the structure for orthogonal data
@@ -62,6 +64,31 @@ var (
 		},
 		[]string{"shape", "position"},
 	)
+	orthosQueueDepth = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "orthos_queue_depth",
+			Help: "Number of orthos waiting to be stored permanently",
+		},
+	)
+	orthosFastPathHits = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "orthos_fast_path_hits",
+			Help: "Number of orthos that were handled by the fast path",
+		},
+	)
+	orthosPermanentStoreAdds = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "orthos_permanent_store_adds",
+			Help: "Number of orthos added to permanent storage",
+		},
+	)
+	orthosFlushDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "orthos_flush_duration_seconds",
+			Help:    "Time taken to flush the orthos queue in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+	)
 )
 
 func init() {
@@ -69,6 +96,10 @@ func init() {
 	prometheus.MustRegister(orthosTotalCount)
 	prometheus.MustRegister(orthosCountByShape)
 	prometheus.MustRegister(orthosCountByLocation)
+	prometheus.MustRegister(orthosQueueDepth)
+	prometheus.MustRegister(orthosFastPathHits)
+	prometheus.MustRegister(orthosPermanentStoreAdds)
+	prometheus.MustRegister(orthosFlushDuration)
 }
 
 // updateOrthoMetrics updates the orthos metrics
@@ -100,23 +131,103 @@ func updateOrthoMetrics(storage *OrthosStorage) {
 		totalCount, len(shapeCounts), len(locationCounts))
 }
 
+// OrthoQueue represents a queue for background processing of orthos
+type OrthoQueue struct {
+	queue []Ortho
+	mutex sync.RWMutex
+}
+
+// NewOrthoQueue creates a new queue for background processing
+func NewOrthoQueue() *OrthoQueue {
+	return &OrthoQueue{
+		queue: make([]Ortho, 0),
+	}
+}
+
+// Add adds an ortho to the queue
+func (q *OrthoQueue) Add(ortho Ortho) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	q.queue = append(q.queue, ortho)
+	// Update the queue depth metric
+	orthosQueueDepth.Set(float64(len(q.queue)))
+}
+
+// GetBatch retrieves a batch of orthos from the queue
+func (q *OrthoQueue) GetBatch(batchSize int) []Ortho {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	if len(q.queue) == 0 {
+		return []Ortho{}
+	}
+
+	// Determine how many items to take
+	count := batchSize
+	if count > len(q.queue) {
+		count = len(q.queue)
+	}
+
+	// Get the batch
+	batch := q.queue[:count]
+
+	// Remove the batch from the queue
+	q.queue = q.queue[count:]
+
+	// Update the queue depth metric
+	orthosQueueDepth.Set(float64(len(q.queue)))
+
+	return batch
+}
+
+// Size returns the current size of the queue
+func (q *OrthoQueue) Size() int {
+	q.mutex.RLock()
+	defer q.mutex.RUnlock()
+	return len(q.queue)
+}
+
+// Clear empties the queue and returns all items
+func (q *OrthoQueue) Clear() []Ortho {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	// Get all items
+	items := q.queue
+
+	// Clear the queue
+	q.queue = make([]Ortho, 0)
+
+	// Update the queue depth metric
+	orthosQueueDepth.Set(0)
+
+	return items
+}
+
 // OrthosStorage provides thread-safe storage for orthos
 type OrthosStorage struct {
-	orthos map[string]Ortho
-	mutex  sync.RWMutex
+	orthos           map[string]Ortho // Permanent storage
+	idSet            map[string]bool  // Fast lookup set
+	permanentMutex   sync.RWMutex     // For permanent storage
+	idSetMutex       sync.RWMutex     // For ID set
+	queue            *OrthoQueue      // Queue for background processing
+	queueFlushSignal chan struct{}    // Signal channel for manual queue flushing
 }
 
 // NewOrthosStorage creates a new orthos storage
 func NewOrthosStorage() *OrthosStorage {
 	return &OrthosStorage{
-		orthos: make(map[string]Ortho),
+		orthos:           make(map[string]Ortho),
+		idSet:            make(map[string]bool),
+		queue:            NewOrthoQueue(),
+		queueFlushSignal: make(chan struct{}, 1), // Buffered channel to avoid blocking
 	}
 }
 
 // CountOrthosByShape returns a count of orthos grouped by shape
 func (s *OrthosStorage) CountOrthosByShape() map[string]int {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
+	s.permanentMutex.RLock()
+	defer s.permanentMutex.RUnlock()
 	shapeCounts := make(map[string]int)
 	for _, ortho := range s.orthos {
 		// Simply use the string representation of the shape array as the key
@@ -130,8 +241,8 @@ func (s *OrthosStorage) CountOrthosByShape() map[string]int {
 
 // CountOrthosByShapeAndLocation returns counts of orthos grouped by shape and by location within shape
 func (s *OrthosStorage) CountOrthosByShapeAndLocation() (map[string]int, map[[2]string]int) {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
+	s.permanentMutex.RLock()
+	defer s.permanentMutex.RUnlock()
 
 	shapeCounts := make(map[string]int)
 	locationCounts := make(map[[2]string]int)
@@ -152,40 +263,117 @@ func (s *OrthosStorage) CountOrthosByShapeAndLocation() (map[string]int, map[[2]
 	return shapeCounts, locationCounts
 }
 
-// AddOrthos adds multiple orthos to storage with thread safety and returns new IDs
+// FastCheckExists quickly checks if an ortho ID exists
+func (s *OrthosStorage) FastCheckExists(id string) bool {
+	s.idSetMutex.RLock()
+	defer s.idSetMutex.RUnlock()
+	_, exists := s.idSet[id]
+	return exists
+}
+
+// AddToFastSet adds an ortho ID to the fast lookup set
+func (s *OrthosStorage) AddToFastSet(id string) {
+	s.idSetMutex.Lock()
+	defer s.idSetMutex.Unlock()
+	s.idSet[id] = true
+}
+
+// AddToPermanentStore adds an ortho to the permanent storage
+func (s *OrthosStorage) AddToPermanentStore(ortho Ortho) {
+	s.permanentMutex.Lock()
+	defer s.permanentMutex.Unlock()
+	s.orthos[ortho.ID] = ortho
+	orthosPermanentStoreAdds.Inc()
+}
+
+// QueueForStorage adds an ortho to the background queue
+func (s *OrthosStorage) QueueForStorage(ortho Ortho) {
+	s.queue.Add(ortho)
+}
+
+// ProcessQueue processes a batch of items from the queue
+func (s *OrthosStorage) ProcessQueue(batchSize int) int {
+	// Get a batch of items
+	batch := s.queue.GetBatch(batchSize)
+	if len(batch) == 0 {
+		return 0
+	}
+
+	// Process each item
+	for _, ortho := range batch {
+		s.AddToPermanentStore(ortho)
+	}
+
+	log.Printf("Processed %d orthos from queue", len(batch))
+	return len(batch)
+}
+
+// FlushQueue immediately processes all queued items
+func (s *OrthosStorage) FlushQueue() int {
+	timer := prometheus.NewTimer(orthosFlushDuration)
+	defer timer.ObserveDuration()
+
+	// Get all items from the queue
+	items := s.queue.Clear()
+	if len(items) == 0 {
+		return 0
+	}
+
+	// Process each item
+	for _, ortho := range items {
+		s.AddToPermanentStore(ortho)
+	}
+
+	log.Printf("Flushed queue: processed %d orthos", len(items))
+	return len(items)
+}
+
+// TriggerQueueFlush signals that the queue should be flushed
+func (s *OrthosStorage) TriggerQueueFlush() {
+	// Try to send a signal non-blocking
+	select {
+	case s.queueFlushSignal <- struct{}{}:
+		log.Printf("Queue flush signal sent")
+	default:
+		log.Printf("Queue flush already pending, skipping signal")
+	}
+}
+
+// AddOrthos adds multiple orthos using the fast path approach and returns new IDs
 func (s *OrthosStorage) AddOrthos(orthos []Ortho) []string {
 	if len(orthos) == 0 {
 		return []string{}
 	}
 
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
 	newIDs := make([]string, 0, len(orthos))
 
 	for _, ortho := range orthos {
-		// Check if the ortho with this ID already exists
-		if _, exists := s.orthos[ortho.ID]; !exists {
-			// Only add to newIDs if it's a new ortho
+		// Fast check if the ID exists
+		if !s.FastCheckExists(ortho.ID) {
+			// ID is new - add to fast set, queue for storage, and add to newIDs
+			s.AddToFastSet(ortho.ID)
+			s.QueueForStorage(ortho)
 			newIDs = append(newIDs, ortho.ID)
+			orthosFastPathHits.Inc()
 		}
-		// Add or update the ortho in the map
-		s.orthos[ortho.ID] = ortho
 	}
 
-	log.Printf("Added %d orthos to storage. %d are new. Total orthos: %d",
-		len(orthos), len(newIDs), len(s.orthos))
-
+	log.Printf("Fast path: processed %d orthos, %d are new", len(orthos), len(newIDs))
 	return newIDs
 }
 
-// GetOrthosByIDs returns orthos matching the provided IDs
+// GetOrthosByIDs returns orthos matching the provided IDs, ensuring queue is flushed first
 func (s *OrthosStorage) GetOrthosByIDs(ids []string) []Ortho {
 	if len(ids) == 0 {
 		return []Ortho{}
 	}
 
-	// No lock needed as per requirements for reads
+	// Flush the queue before reading to ensure consistency
+	s.FlushQueue()
+
+	// Now read from permanent storage
+	s.permanentMutex.RLock()
+	defer s.permanentMutex.RUnlock()
 
 	result := make([]Ortho, 0, len(ids))
 	for _, id := range ids {
@@ -195,6 +383,50 @@ func (s *OrthosStorage) GetOrthosByIDs(ids []string) []Ortho {
 	}
 
 	return result
+}
+
+// startQueueProcessor starts a background goroutine to process the queue
+func startQueueProcessor(storage *OrthosStorage, config OrthosConfig) {
+	// Ensure we have valid values - fix to prevent panic with non-positive ticker interval
+	if config.QueueFlushInterval <= 0 {
+		log.Printf("Warning: Invalid QueueFlushInterval value %d, using default of 15 seconds", config.QueueFlushInterval)
+		config.QueueFlushInterval = 15
+	}
+
+	if config.QueueBatchSize <= 0 {
+		log.Printf("Warning: Invalid QueueBatchSize value %d, using default of 100", config.QueueBatchSize)
+		config.QueueBatchSize = 100
+	}
+
+	log.Printf("Starting orthos queue processor with flush interval %d seconds and batch size %d", config.QueueFlushInterval, config.QueueBatchSize)
+
+	// Create a ticker for regular processing
+	ticker := time.NewTicker(time.Duration(config.QueueFlushInterval) * time.Second)
+
+	// Create a dedicated goroutine for queue processing
+	go func() {
+		// Make sure the ticker is stopped when this goroutine exits
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Regular processing at intervals
+				queueSize := storage.queue.Size()
+				if queueSize > 0 {
+					log.Printf("Processing queue: %d items pending", queueSize)
+					storage.ProcessQueue(config.QueueBatchSize)
+				}
+
+			case <-storage.queueFlushSignal:
+				// Manually triggered flush
+				log.Printf("Manual queue flush triggered")
+				storage.FlushQueue()
+			}
+		}
+	}()
+
+	log.Printf("Queue processor goroutine started successfully")
 }
 
 // Global storage instance
@@ -207,16 +439,24 @@ func startMetricsUpdater(storage *OrthosStorage) {
 	// Immediately update metrics on startup
 	updateOrthoMetrics(storage)
 
+	// Create a ticker for periodic updates
 	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			log.Printf("Metrics update triggered by ticker")
-			updateOrthoMetrics(storage)
+	// Create a dedicated goroutine for metrics updating
+	go func() {
+		// Make sure the ticker is stopped when this goroutine exits
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				log.Printf("Metrics update triggered by ticker")
+				updateOrthoMetrics(storage)
+			}
 		}
-	}
+	}()
+
+	log.Printf("Metrics updater goroutine started successfully")
 }
 
 func handleRoot(c *gin.Context) {
@@ -245,11 +485,8 @@ func handleOrthos(c *gin.Context) {
 			i, ortho.ID, ortho.Shell, ortho.Position, ortho.Shape)
 	}
 
-	// Store orthos in memory and get new IDs
+	// Use fast path for adding orthos
 	newIDs := orthosStorage.AddOrthos(request.Orthos)
-
-	// Update metrics explicitly after adding new orthos
-	updateOrthoMetrics(orthosStorage)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
@@ -272,7 +509,7 @@ func handleGetOrthosByIDs(c *gin.Context) {
 		return
 	}
 
-	// Get orthos by IDs
+	// This will trigger a queue flush before getting orthos
 	matchedOrthos := orthosStorage.GetOrthosByIDs(request.IDs)
 	log.Printf("Found %d orthos matching %d requested IDs", len(matchedOrthos), len(request.IDs))
 
@@ -288,9 +525,6 @@ func main() {
 	// Initialize orthos storage
 	orthosStorage = NewOrthosStorage()
 
-	// Start background metrics updater
-	go startMetricsUpdater(orthosStorage)
-
 	// Load configuration
 	var cfg OrthosConfig
 	// Set service name before loading config
@@ -302,6 +536,10 @@ func main() {
 	// Log configuration details
 	log.Printf("Using configuration: %+v", cfg)
 	config.LogConfig(cfg.BaseConfig)
+
+	// Start background workers - just call the functions directly since they now handle goroutine creation internally
+	startMetricsUpdater(orthosStorage)
+	startQueueProcessor(orthosStorage, cfg)
 
 	// Set up common components using the shared helper
 	router, tp, mp, pp, err := middleware.SetupCommonComponents(
@@ -348,6 +586,15 @@ func main() {
 	router.GET("/", handleRoot)
 	router.POST("/orthos", handleOrthos)
 	router.POST("/orthos/get", handleGetOrthosByIDs)
+
+	// Add an endpoint to manually trigger queue flushing
+	router.POST("/flush", func(c *gin.Context) {
+		orthosStorage.TriggerQueueFlush()
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success",
+			"message": "Queue flush triggered",
+		})
+	})
 
 	// Start the server
 	address := cfg.GetAddress()

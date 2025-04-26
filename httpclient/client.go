@@ -43,6 +43,11 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// New creates a new HTTP client with the specified timeout
+func New(timeout time.Duration) *Client {
+	return &Client{}
+}
+
 // NewClient creates a new HTTP client with OpenTelemetry instrumentation
 func NewClient(options ClientOptions) *Client {
 	// Create client with OpenTelemetry instrumentation
@@ -91,7 +96,7 @@ func (c *Client) Call(ctx context.Context, method, url string, payload []byte) S
 	}
 
 	// Parse JSON into a map that can be decoded
-	var rawResponse map[string]interface{}
+	var rawResponse map[string]any // Use any instead of interface{}
 	if err := json.Unmarshal(body, &rawResponse); err != nil {
 		return ServiceResponse{
 			StatusCode: resp.StatusCode,

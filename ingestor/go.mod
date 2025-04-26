@@ -16,9 +16,12 @@ replace crochet/types => ../types
 
 replace crochet/clients => ../clients
 
+replace crochet/health => ../health
+
 require (
 	crochet/clients v0.0.0-00010101000000-000000000000
 	crochet/config v0.0.0-00010101000000-000000000000
+	crochet/health v0.0.0-00010101000000-000000000000
 	crochet/httpclient v0.0.0-00010101000000-000000000000
 	crochet/middleware v0.0.0-00010101000000-000000000000
 	crochet/telemetry v0.0.0

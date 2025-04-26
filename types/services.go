@@ -37,13 +37,6 @@ type OrthosService interface {
 	SaveOrthos(ctx context.Context, orthos []Ortho) (OrthosSaveResponse, error)
 }
 
-// OrthosSaveResponse represents the response after saving orthos
-type OrthosSaveResponse struct {
-	Status  string `json:"status"`
-	Message string `json:"message"`
-	Count   int    `json:"count"`
-}
-
 // WorkServerService defines the interface for interacting with the work server
 type WorkServerService interface {
 	PushOrthos(ctx context.Context, orthos []Ortho) (WorkServerPushResponse, error)
@@ -80,10 +73,10 @@ type SearchRequest struct {
 
 // SearchResult represents a single search result
 type SearchResult struct {
-	OrthoID      string      `json:"orthoId"`
-	Score        float64     `json:"score"`
-	OrthoData    interface{} `json:"orthoData,omitempty"`
-	Remediations interface{} `json:"remediations,omitempty"`
+	OrthoID      string  `json:"orthoId"`
+	Score        float64 `json:"score"`
+	OrthoData    any     `json:"orthoData,omitempty"`    // Use any instead of interface{}
+	Remediations any     `json:"remediations,omitempty"` // Use any instead of interface{}
 }
 
 // SearchResponse represents the response to a search query

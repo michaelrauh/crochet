@@ -22,6 +22,12 @@ services:
         condition: service_started
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-H", "Accept: application/json", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
     environment:
       - INGESTOR_SERVICE_NAME=ingestor
       - INGESTOR_CONTEXT_SERVICE_URL=http://context:8081
@@ -169,8 +175,14 @@ services:
     build:
       context: .
       dockerfile: ./search/Dockerfile
+    deploy:
+      replicas: 5
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
     ports:
-      - "8085:8085"
+      - "8085"  # Only specify container port to allow Docker to allocate ports dynamically
     networks:
       - app-network
     depends_on:

@@ -5,7 +5,6 @@ go 1.24.2
 require (
 	crochet/httpclient v0.0.0-00010101000000-000000000000
 	crochet/types v0.0.0-00010101000000-000000000000
-	github.com/gin-gonic/gin v1.10.0
 	github.com/stretchr/testify v1.10.0
 )
 
@@ -18,6 +17,7 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
+	github.com/gin-gonic/gin v1.10.0 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect

@@ -28,7 +28,9 @@ echo "Pruning unused volumes..."
 docker volume prune -f
 
 echo "Restarting services..."
-docker-compose up -d
+docker-compose up --build -d
+
+./send_princess.sh
 
 echo "Prometheus and Grafana data have been reset. Wait a moment for the services to fully initialize."
 echo "You can access Grafana at http://localhost:3000 with username 'admin' and password 'admin'"

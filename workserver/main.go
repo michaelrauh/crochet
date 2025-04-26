@@ -105,6 +105,15 @@ var (
 			Help: "Total number of items processed from the queue",
 		},
 	)
+
+	// Add counter vector for processed items by shape and position
+	itemsProcessedByShapePosition = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "workserver_items_processed_shape_position_total",
+			Help: "Total number of items processed from the queue by shape and position",
+		},
+		[]string{"shape", "position"},
+	)
 )
 
 func init() {
@@ -119,6 +128,7 @@ func init() {
 	prometheus.MustRegister(queueDepthInFlightByShapePosition) // Register new metric
 	prometheus.MustRegister(orthoProcessingDuration)
 	prometheus.MustRegister(itemsProcessedTotal)
+	prometheus.MustRegister(itemsProcessedByShapePosition) // Register the new shape×position metric
 }
 
 // updateQueueMetrics periodically updates the queue metrics
@@ -173,6 +183,15 @@ func updateQueueMetrics() {
 				log.Printf("Debug: In-flight Shape×Position metric: shape=%s, position=%s, count=%d",
 					shape, position, count)
 				queueDepthInFlightByShapePosition.WithLabelValues(shape, position).Set(float64(count))
+			}
+
+			// Update processed items by shape and position
+			processedCounts := workQueue.CountProcessedByShapeAndPosition()
+			for key, count := range processedCounts {
+				shape, position := key[0], key[1]
+				log.Printf("Debug: Processed Shape×Position metric: shape=%s, position=%s, count=%d",
+					shape, position, count)
+				itemsProcessedByShapePosition.WithLabelValues(shape, position).Add(float64(count))
 			}
 
 			log.Printf("Updated metrics: total=%d, queued=%d, in-flight=%d, shapes=%v",

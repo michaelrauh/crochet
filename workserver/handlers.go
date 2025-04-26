@@ -119,6 +119,11 @@ func handleAck(c *gin.Context) {
 
 			log.Printf("Recorded processing time for shape=%s, position=%s: %.3f seconds",
 				shapeStr, positionStr, processingTime)
+
+			// Increment the processed items by shape×position counter
+			itemsProcessedByShapePosition.WithLabelValues(shapeStr, positionStr).Inc()
+			log.Printf("Incremented processed items counter for shape=%s, position=%s",
+				shapeStr, positionStr)
 		}
 	}
 

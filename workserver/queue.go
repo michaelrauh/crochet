@@ -273,3 +273,13 @@ func (q *WorkQueue) CountInFlightByShapeAndPosition() map[[2]string]int {
 	}
 	return locationCounts
 }
+
+// CountProcessedByShapeAndPosition is a placeholder to return shape×position metrics
+// Since we're only incrementing counters at ACK time in the handler directly,
+// we return an empty map here as the real counting is done elsewhere
+func (q *WorkQueue) CountProcessedByShapeAndPosition() map[[2]string]int {
+	// This is a placeholder function
+	// The actual counting is done in the handleAck function
+	// where we increment Prometheus counters directly
+	return make(map[[2]string]int)
+}

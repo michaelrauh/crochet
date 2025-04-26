@@ -87,6 +87,14 @@ var (
 		},
 		[]string{"shape", "position"},
 	)
+
+	// Add counter for total processed items
+	itemsProcessedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "workserver_items_processed_total",
+			Help: "Total number of items processed from the queue",
+		},
+	)
 )
 
 func init() {
@@ -99,6 +107,7 @@ func init() {
 	prometheus.MustRegister(queueDepthInFlightByShape)
 	prometheus.MustRegister(queueDepthQueuedByShapePosition)
 	prometheus.MustRegister(orthoProcessingDuration)
+	prometheus.MustRegister(itemsProcessedTotal)
 }
 
 // updateQueueMetrics periodically updates the queue metrics

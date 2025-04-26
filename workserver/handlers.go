@@ -133,6 +133,9 @@ func handleAck(c *gin.Context) {
 		return
 	}
 
+	// Increment the processed items counter when an acknowledgment is successful
+	itemsProcessedTotal.Inc()
+
 	c.JSON(http.StatusOK, AckResponse{
 		Status:  "success",
 		Message: "Work item acknowledged successfully",

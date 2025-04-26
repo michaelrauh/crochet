@@ -11,7 +11,19 @@ import (
 	"crochet/middleware"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+// Define Prometheus metrics for the remediations service
+var (
+	remediationsTotalCount = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "remediations_total_count",
+			Help: "Total number of remediations stored in the service",
+		},
+	)
 )
 
 func main() {
@@ -83,6 +95,17 @@ func main() {
 	// Register the HTTP endpoints
 	router.POST("/remediations", store.AddHandler)
 	router.GET("/remediations", store.GetHandler)
+
+	// Start a goroutine to periodically update the metrics
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			store.mu.RLock()
+			remediationsTotalCount.Set(float64(len(store.store)))
+			store.mu.RUnlock()
+		}
+	}()
 
 	// Start the HTTP server
 	address := cfg.GetAddress()

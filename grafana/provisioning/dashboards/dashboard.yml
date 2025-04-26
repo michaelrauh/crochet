@@ -4,8 +4,12 @@ providers:
   - name: 'Crochet Dashboards'
     orgId: 1
     folder: 'Crochet'
+    folderUid: ''
     type: file
     disableDeletion: false
     editable: true
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
     options:
       path: /etc/grafana/provisioning/dashboards/crochet
+      foldersFromFilesStructure: true

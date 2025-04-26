@@ -197,3 +197,74 @@ func handleNack(c *gin.Context) {
 		Message: "Work item returned to queue successfully",
 	})
 }
+
+// handleSampleInFlight handles the endpoint to sample a currently processing ortho
+func handleSampleInFlight(c *gin.Context) {
+	// Get a lock to ensure we have a consistent snapshot
+	workQueue.mutex.Lock()
+	defer workQueue.mutex.Unlock()
+
+	// Find in-flight items
+	var inFlightItems []*WorkItem
+	for _, item := range workQueue.items {
+		if item.InProgress {
+			inFlightItems = append(inFlightItems, item)
+		}
+	}
+
+	// If no in-flight items, return empty response
+	if len(inFlightItems) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success",
+			"message": "No in-flight items found",
+			"count":   0,
+			"samples": []interface{}{},
+		})
+		return
+	}
+
+	// Limit the response to a maximum of 5 samples to avoid overwhelming responses
+	maxSamples := 5
+	if len(inFlightItems) > maxSamples {
+		// Take a few samples from the beginning of the list
+		inFlightItems = inFlightItems[:maxSamples]
+	}
+
+	// Create sample data with details about each in-flight ortho
+	samples := make([]gin.H, len(inFlightItems))
+	for i, item := range inFlightItems {
+		// Create a map of grid values for easier visualization
+		gridSample := make([]gin.H, 0, len(item.Ortho.Grid))
+		for k, v := range item.Ortho.Grid {
+			gridSample = append(gridSample, gin.H{
+				"key":   k,
+				"value": v,
+			})
+		}
+
+		// Calculate processing time so far
+		var processingTime float64
+		if item.DequeuedTime != nil {
+			processingTime = time.Since(*item.DequeuedTime).Seconds()
+		}
+
+		samples[i] = gin.H{
+			"id":                  item.ID,
+			"shape":               item.Ortho.Shape,
+			"position":            item.Ortho.Position,
+			"shell":               item.Ortho.Shell,
+			"grid_size":           len(item.Ortho.Grid),
+			"grid_sample":         gridSample,
+			"processing_time_sec": processingTime,
+			"enqueued_at":         item.EnqueuedTime,
+			"dequeued_at":         item.DequeuedTime,
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Successfully sampled in-flight items",
+		"count":   len(samples),
+		"samples": samples,
+	})
+}

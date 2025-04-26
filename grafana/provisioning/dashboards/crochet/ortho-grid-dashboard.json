@@ -1,0 +1,94 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": 3,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "links": [
+            {
+              "targetBlank": true,
+              "title": "View In-Flight Ortho Samples",
+              "url": "http://localhost:8084/sample-in-flight"
+            }
+          ],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "content": "# Ortho Grid Visualization\n\nThe grid structure of currently in-flight orthos can be viewed in real-time by clicking the link below.\n\n## [View Live Ortho Grid Samples](http://localhost:8084/sample-in-flight)\n\nThis will show you a sample of up to 5 currently processing orthos with their complete grid structures and metadata.\n",
+        "mode": "markdown"
+      },
+      "pluginVersion": "9.5.3",
+      "title": "Ortho Grid Viewer",
+      "type": "text"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": [],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Ortho Grid Dashboard",
+  "uid": "46QLzYG4z",
+  "version": 1,
+  "weekStart": ""
+}

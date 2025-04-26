@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
+	"log"
+	"time"
+
 	"crochet/config"
 	"crochet/health"
 	"crochet/middleware"
-	"log"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
@@ -78,6 +79,15 @@ var (
 		[]string{"shape", "position"},
 	)
 
+	// Add a new metric to track in-flight items by shape and position
+	queueDepthInFlightByShapePosition = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workserver_queue_depth_in_flight_shape_position",
+			Help: "Number of in-flight items currently being processed by shape and position",
+		},
+		[]string{"shape", "position"},
+	)
+
 	// Add a new metric for tracking processing time by shape and position
 	orthoProcessingDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -106,8 +116,17 @@ func init() {
 	prometheus.MustRegister(queueDepthQueuedByShape)
 	prometheus.MustRegister(queueDepthInFlightByShape)
 	prometheus.MustRegister(queueDepthQueuedByShapePosition)
+	prometheus.MustRegister(queueDepthInFlightByShapePosition) // Register new metric
 	prometheus.MustRegister(orthoProcessingDuration)
 	prometheus.MustRegister(itemsProcessedTotal)
+}
+
+// helper function for our sample in flight endpoint
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // updateQueueMetrics periodically updates the queue metrics
@@ -152,6 +171,16 @@ func updateQueueMetrics() {
 				log.Printf("Debug: Shape×Position metric: shape=%s, position=%s, count=%d",
 					shape, position, count)
 				queueDepthQueuedByShapePosition.WithLabelValues(shape, position).Set(float64(count))
+			}
+
+			// Update shape+position metrics for in-flight items
+			inFlightPositionCounts := workQueue.CountInFlightByShapeAndPosition()
+			queueDepthInFlightByShapePosition.Reset()
+			for key, count := range inFlightPositionCounts {
+				shape, position := key[0], key[1]
+				log.Printf("Debug: In-flight Shape×Position metric: shape=%s, position=%s, count=%d",
+					shape, position, count)
+				queueDepthInFlightByShapePosition.WithLabelValues(shape, position).Set(float64(count))
 			}
 
 			log.Printf("Updated metrics: total=%d, queued=%d, in-flight=%d, shapes=%v",
@@ -228,6 +257,12 @@ func main() {
 		c.Request = c.Request.WithContext(ctxWithConfig)
 		handleNack(c)
 	})
+
+	// Add sample in-flight endpoint
+	router.GET("/sample-in-flight", handleSampleInFlight)
+
+	// Log that we've registered all endpoints
+	log.Printf("Registered API endpoints: /, /push, /pop, /ack, /nack, /sample-in-flight")
 
 	// Start the server
 	address := cfg.GetAddress()

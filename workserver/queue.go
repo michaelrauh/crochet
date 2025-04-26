@@ -255,3 +255,21 @@ func (q *WorkQueue) CountQueuedByShapeAndPosition() map[[2]string]int {
 
 	return locationCounts
 }
+
+// CountInFlightByShapeAndPosition returns a map of shape+position to count of in-flight items
+func (q *WorkQueue) CountInFlightByShapeAndPosition() map[[2]string]int {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	locationCounts := make(map[[2]string]int)
+	for _, item := range q.items {
+		if item.InProgress {
+			// Only count items that are currently being processed
+			shapeKey := fmt.Sprintf("%v", item.Ortho.Shape)
+			posKey := fmt.Sprintf("%v", item.Ortho.Position)
+			// Create a composite key for shape+position
+			locationKey := [2]string{shapeKey, posKey}
+			locationCounts[locationKey]++
+		}
+	}
+	return locationCounts
+}

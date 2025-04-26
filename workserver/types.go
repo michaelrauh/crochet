@@ -12,6 +12,7 @@ type WorkItem struct {
 	DequeuedTime *time.Time  `json:"dequeuedTime"`
 	ID           string      `json:"id"`
 	InProgress   bool        `json:"inProgress"`
+	Payload      string      `json:"-"` // Serialized JSON payload (added for the sample endpoint)
 }
 
 // PushRequest represents a request to push orthos to the work queue

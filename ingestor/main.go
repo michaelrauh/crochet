@@ -111,46 +111,30 @@ func main() {
 		cfg.MetricsEndpoint,
 		cfg.PyroscopeEndpoint,
 	)
-	// TODO pick up here
 	if err != nil {
 		log.Fatalf("Failed to set up application: %v", err)
 	}
-	// Ensure resources are properly cleaned up
 	defer tp.ShutdownWithTimeout(5 * time.Second)
-	if mp != nil {
-		defer mp.ShutdownWithTimeout(5 * time.Second)
-	}
-	if pp != nil {
-		defer pp.StopWithTimeout(5 * time.Second)
-	}
+	defer mp.ShutdownWithTimeout(5 * time.Second)
+	defer pp.StopWithTimeout(5 * time.Second)
 
-	// Set up HTTP client (specific to ingestor service)
-	httpClientOptions := httpclient.ClientOptions{
-		DialTimeout:   cfg.DialTimeout,
-		DialKeepAlive: cfg.DialKeepAlive,
-		MaxIdleConns:  cfg.MaxIdleConns,
-		ClientTimeout: cfg.ClientTimeout,
-	}
 	log.Printf("HTTP client options: DialTimeout=%v, DialKeepAlive=%v, MaxIdleConns=%d, ClientTimeout=%v",
 		cfg.DialTimeout, cfg.DialKeepAlive, cfg.MaxIdleConns, cfg.ClientTimeout)
 
-	httpClient := httpclient.NewClient(httpClientOptions)
+	httpClient := httpclient.NewDefaultClient()
 
-	// Initialize services using the new clients package
 	contextService := clients.NewContextService(cfg.ContextServiceURL, httpClient)
 	remediationsService := clients.NewRemediationsService(cfg.RemediationsServiceURL, httpClient)
 	orthosService := clients.NewOrthosService(cfg.OrthosServiceURL, httpClient)
 	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, httpClient)
 
-	// Register routes
 	router.POST("/ingest", func(c *gin.Context) {
-		c.Set("config", cfg) // Store config in context for logging
+		c.Set("config", cfg)
 		ctxWithConfig := context.WithValue(c.Request.Context(), configKey, cfg)
 		c.Request = c.Request.WithContext(ctxWithConfig)
 		ginHandleTextInput(c, contextService, remediationsService, orthosService, workServerService)
 	})
 
-	// Set up health check
 	healthCheck := health.New(health.Options{
 		ServiceName: cfg.ServiceName,
 		Version:     "1.0.0",
@@ -159,10 +143,8 @@ func main() {
 		},
 	})
 
-	// Register health check handler in the gin router
 	router.GET("/health", gin.WrapF(healthCheck.Handler()))
 
-	// Start the server
 	address := cfg.GetAddress()
 	log.Printf("Server starting on %s...\n", address)
 	if err := router.Run(address); err != nil {

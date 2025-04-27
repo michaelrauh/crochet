@@ -12,7 +12,7 @@ import (
 	"github.com/mitchellh/mapstructure"
 )
 
-// ProcessIncomingCorpus extracts and validates corpus from a request
+// Todo fix
 func ProcessIncomingCorpus(c *gin.Context, serviceName string) (Corpus, error) {
 	var corpus Corpus
 	body, err := io.ReadAll(c.Request.Body)
@@ -77,7 +77,7 @@ func ProcessContextResponse(rawResponse map[string]interface{}) (*ContextRespons
 	return &response, nil
 }
 
-// ExtractPairsFromSubphrases converts a list of subphrases to a list of pairs
+// Todo fix
 func ExtractPairsFromSubphrases(subphrases [][]string) [][]string {
 	var pairs [][]string
 	for _, subphrase := range subphrases {

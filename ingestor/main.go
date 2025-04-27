@@ -2,10 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -23,51 +19,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ingestMutex ensures only one ingest operation runs at a time
 var ingestMutex sync.Mutex
 
-// contextKey is a custom type for context keys to avoid collisions
 type contextKey string
 
-// config key constant
 const configKey contextKey = "config"
 
-// GenerateID creates a unique ID for an ortho
-func GenerateID() string {
-	// Generate 16 random bytes
-	randomBytes := make([]byte, 16)
-	_, err := rand.Read(randomBytes)
-	if err != nil {
-		// Fall back to timestamp-based ID in case of error
-		return fmt.Sprintf("id-%d", time.Now().UnixNano())
-	}
-
-	// Convert to hex string
-	return hex.EncodeToString(randomBytes)
-}
-
-// createNewOrtho creates and returns a new Ortho object with default values
-func createNewOrtho() types.Ortho {
-	return types.Ortho{
-		Grid:     make(map[string]string),
-		Shape:    []int{2, 2},
-		Position: []int{0, 0},
-		Shell:    0,
-		ID:       GenerateID(),
-	}
-}
-
-// healthHandler returns a simple health response
-func healthHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "ok",
-		"service":   "ingestor",
-		"timestamp": time.Now().Format(time.RFC3339),
-	})
-}
-
 func ginHandleTextInput(c *gin.Context, contextService types.ContextService, remediationsService types.RemediationsService, orthosService types.OrthosService, workServerService types.WorkServerService) {
-	// Try to acquire the mutex, return busy status if we can't
 	if !ingestMutex.TryLock() {
 		c.JSON(http.StatusLocked, gin.H{
 			"status":  "error",
@@ -75,82 +33,34 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 		})
 		return
 	}
-	// Ensure we release the mutex when done
 	defer ingestMutex.Unlock()
-
-	log.Println("Starting ingest processing...")
 
 	corpus, err := types.ProcessIncomingCorpus(c, "ingestor")
 	if telemetry.LogAndError(c, err, "ingestor", "Error processing incoming corpus") {
 		return
 	}
-	fmt.Printf("Title: %s\nText length: %d characters\n", corpus.Title, len(corpus.Text))
 
-	log.Println("Generating subphrases and vocabulary...")
-	subphrases := text.GenerateSubphrases(corpus.Text)
-	vocabulary := text.Vocabulary(corpus.Text)
-	log.Printf("Generated %d subphrases and %d vocabulary items", len(subphrases), len(vocabulary))
-
-	// Create input for context service
-	contextInput := types.ContextInput{
+	contextResponse, err := contextService.SendMessage(c.Request.Context(), types.ContextInput{
 		Title:      corpus.Title,
-		Vocabulary: vocabulary,
-		Subphrases: subphrases,
-	}
-
-	log.Println("Sending data to context service...")
-	// Send to context service with request context to maintain trace
-	contextResponse, err := contextService.SendMessage(c.Request.Context(), contextInput)
+		Vocabulary: text.Vocabulary(corpus.Text),
+		Subphrases: text.GenerateSubphrases(corpus.Text),
+	})
 	if telemetry.LogAndError(c, err, "ingestor", "Error sending message to context service") {
-		log.Printf("Context service error details: %v", err)
 		return
 	}
 
-	// Add detailed logging for context response
-	contextRespJSON, _ := json.Marshal(contextResponse)
-	log.Printf("DEBUG: Full context service response: %s", string(contextRespJSON))
-
-	log.Printf("Received response from context service with version: %d and %d new subphrases",
-		contextResponse.Version, len(contextResponse.NewSubphrases))
-
-	// Extract pairs for remediations
 	pairs := types.ExtractPairsFromSubphrases(contextResponse.NewSubphrases)
-	log.Printf("DEBUG: Extracted pairs from subphrases: %v", pairs)
-	log.Printf("Extracted %d pairs from subphrases for remediation", len(pairs))
 
-	remediationReq := types.RemediationRequest{
+	remediationResp, err := remediationsService.FetchRemediations(c.Request.Context(), types.RemediationRequest{
 		Pairs: pairs,
-	}
+	})
 
-	// Log detailed request to remediation service
-	pairsJSON, _ := json.Marshal(pairs)
-
-	// Use Get instead of MustGet to handle test environment
-	var remediationsServiceURL string
-	if cfg, exists := c.Get("config"); exists {
-		remediationsServiceURL = cfg.(*config.IngestorConfig).RemediationsServiceURL
-		log.Printf("Calling remediations service at URL: %s", remediationsServiceURL)
-	}
-	log.Printf("Remediation request contains %d pairs: %s", len(pairs), string(pairsJSON))
-
-	// Send to remediations service with request context to maintain trace
-	startTime := time.Now()
-	remediationResp, err := remediationsService.FetchRemediations(c.Request.Context(), remediationReq)
-	elapsed := time.Since(startTime)
-
-	if err != nil {
-		log.Printf("ERROR: Remediation service call failed after %v: %v", elapsed, err)
-		telemetry.LogAndError(c, err, "ingestor", "Error fetching remediations")
+	if telemetry.LogAndError(c, err, "ingestor", "Error fetching remediations") {
 		return
 	}
 
-	log.Printf("Successfully received response from remediations service in %v with %d hashes",
-		elapsed, len(remediationResp.Hashes))
-
-	// Store the hashes we received for later cleanup
 	processedHashes := remediationResp.Hashes
 
-	// If we have hashes from the remediation service, get corresponding orthos
 	var orthosResp types.OrthosResponse
 	if len(remediationResp.Hashes) > 0 {
 		log.Printf("Fetching orthos for %d hashes...", len(remediationResp.Hashes))

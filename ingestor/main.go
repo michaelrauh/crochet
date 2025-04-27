@@ -19,6 +19,7 @@ import (
 	"crochet/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kelseyhightower/envconfig"
 )
 
 var ingestMutex sync.Mutex
@@ -93,34 +94,17 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 	response := gin.H{
 		"status":  "success",
 		"version": contextResponse.Version,
-		"hashes":  remediationResp.Hashes,
-	}
-	// Add orthos to the response if we have any
-	if orthosResp.Count > 0 {
-		response["orthos"] = orthosResp.Orthos
-		response["orthosCount"] = orthosResp.Count
 	}
 
-	log.Println("Ingest operation completed successfully")
 	c.JSON(http.StatusOK, response)
 }
 
 func main() {
-	// Load configuration
-	cfg, err := config.LoadIngestorConfig()
-	if err != nil {
+	var cfg config.IngestorConfig
+	if err := envconfig.Process("INGESTOR", &cfg); err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Log configuration details
-	log.Printf("Using unified configuration management: %+v", cfg)
-	config.LogConfig(cfg.BaseConfig)
-	log.Printf("Remediations service URL: %s", cfg.RemediationsServiceURL)
-	log.Printf("Context service URL: %s", cfg.ContextServiceURL)
-	log.Printf("Orthos service URL: %s", cfg.OrthosServiceURL)
-	log.Printf("Work server URL: %s", cfg.WorkServerURL)
-
-	// Set up common components using the updated shared helper with profiling
 	router, tp, mp, pp, err := middleware.SetupCommonComponents(
 		cfg.ServiceName,
 		cfg.JaegerEndpoint,

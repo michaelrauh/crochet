@@ -17,24 +17,24 @@ type ContextServiceClient struct {
 	Client *httpclient.Client
 }
 
-// TODO fix
 func (s *ContextServiceClient) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
-	// Marshal to JSON for the HTTP request
 	requestJSON, err := json.Marshal(input)
 	if err != nil {
-		return types.ContextResponse{}, fmt.Errorf("error marshaling context request: %w", err)
+		return types.ContextResponse{}, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/input", requestJSON)
 	if serviceResp.Error != nil {
-		return types.ContextResponse{}, fmt.Errorf("error calling context service: %w", serviceResp.Error)
+		return types.ContextResponse{}, fmt.Errorf("service call failed: %w", serviceResp.Error)
 	}
 
-	log.Printf("Received context service raw response: %v", serviceResp.RawResponse)
-
 	var response types.ContextResponse
-	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
-		return types.ContextResponse{}, fmt.Errorf("error parsing context response: %w", err)
+	rawResponseBytes, err := json.Marshal(serviceResp.RawResponse)
+	if err != nil {
+		return types.ContextResponse{}, fmt.Errorf("error marshaling raw response: %w", err)
+	}
+	if err := json.Unmarshal(rawResponseBytes, &response); err != nil {
+		return types.ContextResponse{}, fmt.Errorf("error unmarshaling service response: %w", err)
 	}
 
 	return response, nil

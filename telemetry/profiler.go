@@ -20,7 +20,7 @@ type ProfilerProvider struct {
 	enabled  bool
 }
 
-// InitProfiler initializes a Pyroscope profiler
+// TODO fix
 func InitProfiler(serviceName string, pyroscopeEndpoint string) (*ProfilerProvider, error) {
 	log.Printf("Initializing Pyroscope profiler for service: %s with endpoint: %s", serviceName, pyroscopeEndpoint)
 

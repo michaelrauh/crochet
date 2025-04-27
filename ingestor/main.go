@@ -111,6 +111,7 @@ func main() {
 		cfg.MetricsEndpoint,
 		cfg.PyroscopeEndpoint,
 	)
+	// TODO pick up here
 	if err != nil {
 		log.Fatalf("Failed to set up application: %v", err)
 	}

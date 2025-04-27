@@ -39,7 +39,7 @@ type MeterProvider struct {
 	provider *sdkmetric.MeterProvider
 }
 
-// InitMeter initializes an OpenTelemetry MeterProvider
+// TODO fix
 func InitMeter(serviceName string, metricsEndpoint string) (*MeterProvider, error) {
 	log.Printf("Initializing OpenTelemetry metrics for service: %s with endpoint: %s", serviceName, metricsEndpoint)
 

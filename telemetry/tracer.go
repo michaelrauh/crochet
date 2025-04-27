@@ -21,8 +21,7 @@ type TracerProvider struct {
 	provider *tracesdk.TracerProvider
 }
 
-// InitTracer initializes an OpenTelemetry TracerProvider with an OTLP exporter
-// that exports to a Jaeger collector at the specified endpoint
+// TODO fix
 func InitTracer(serviceName string, jaegerEndpoint string) (*TracerProvider, error) {
 	// Create OTLP exporter
 	ctx := context.Background()

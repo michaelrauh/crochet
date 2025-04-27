@@ -189,12 +189,17 @@ func DeleteRemediationsFromStore(store *RemediationMemoryStore, hashes []string)
 	}
 
 	// Create a new slice to hold remediations that aren't being deleted
+	// Since we no longer have hashes in the RemediationTuple, we'll need to modify
+	// the deletion logic. For backward compatibility, we'll treat each pair's string
+	// representation as a potential match for the hashes.
 	newRemediations := make([]RemediationTuple, 0, len(store.Remediations))
 	deletedCount := 0
 
-	// Add only remediations that don't have a hash in the delete list
+	// Add only remediations that don't match any hash
 	for _, remediation := range store.Remediations {
-		if _, shouldDelete := hashMap[remediation.Hash]; !shouldDelete {
+		// Create a string from the pair that could be used as a hash equivalent
+		pairKey := createPairKey(remediation.Pair)
+		if _, shouldDelete := hashMap[pairKey]; !shouldDelete {
 			newRemediations = append(newRemediations, remediation)
 		} else {
 			deletedCount++

@@ -37,10 +37,9 @@ type RemediationResponse struct {
 	Hashes []string `mapstructure:"hashes" json:"hashes"`
 }
 
-// RemediationTuple represents a single remediation with a string pair and a hash
+// RemediationTuple represents a single remediation with a string pair
 type RemediationTuple struct {
 	Pair []string `mapstructure:"pair" json:"pair"`
-	Hash string   `mapstructure:"hash" json:"hash"`
 }
 
 // RemediationMemoryStore represents the in-memory storage for the remediation service

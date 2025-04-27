@@ -11,41 +11,30 @@ func InitRemediationStore() *RemediationMemoryStore {
 // SaveRemediationsToStore adds remediations to the store and returns the number of new items added
 func SaveRemediationsToStore(store *RemediationMemoryStore, remediations []RemediationTuple) int {
 	// Create a map for faster lookups
-	existingMap := make(map[string]map[string]struct{})
+	existingMap := make(map[string]struct{})
 
 	// Populate the map with existing remediations
-	// Using a nested map: hash -> pairString -> struct{}
 	for _, remediation := range store.Remediations {
-		if _, exists := existingMap[remediation.Hash]; !exists {
-			existingMap[remediation.Hash] = make(map[string]struct{})
-		}
 		// Create a string key from the pair for map lookup
 		pairKey := createPairKey(remediation.Pair)
-		existingMap[remediation.Hash][pairKey] = struct{}{}
+		existingMap[pairKey] = struct{}{}
 	}
 
 	addedCount := 0
 	for _, newRemediation := range remediations {
-		// Check if the hash exists in our map
-		if hashMap, hashExists := existingMap[newRemediation.Hash]; hashExists {
-			// Check if the pair exists for this hash
-			pairKey := createPairKey(newRemediation.Pair)
-			if _, pairExists := hashMap[pairKey]; pairExists {
-				// This remediation already exists
-				continue
-			}
-		} else {
-			// Create a new entry for this hash if it doesn't exist
-			existingMap[newRemediation.Hash] = make(map[string]struct{})
+		// Create a pair key for the new remediation
+		pairKey := createPairKey(newRemediation.Pair)
+
+		// Check if this pair already exists
+		if _, exists := existingMap[pairKey]; exists {
+			// This remediation already exists
+			continue
 		}
 
 		// Add the new remediation
 		store.Remediations = append(store.Remediations, newRemediation)
-
 		// Update our map to include this new remediation
-		pairKey := createPairKey(newRemediation.Pair)
-		existingMap[newRemediation.Hash][pairKey] = struct{}{}
-
+		existingMap[pairKey] = struct{}{}
 		addedCount++
 	}
 

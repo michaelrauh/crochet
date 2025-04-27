@@ -11,9 +11,7 @@ func TestSaveRemediationsToStore(t *testing.T) {
 	// Test 1: Add a single new remediation
 	remediation1 := RemediationTuple{
 		Pair: []string{"word1", "word2"},
-		Hash: "hash1",
 	}
-
 	count := SaveRemediationsToStore(store, []RemediationTuple{remediation1})
 	if count != 1 {
 		t.Errorf("Expected to add 1 remediation, but added %d", count)
@@ -31,15 +29,13 @@ func TestSaveRemediationsToStore(t *testing.T) {
 		t.Errorf("Expected store to still have 1 remediation, but has %d", len(store.Remediations))
 	}
 
-	// Test 3: Add a remediation with the same hash but different pair
+	// Test 3: Add a remediation with different pair
 	remediation2 := RemediationTuple{
 		Pair: []string{"word3", "word4"},
-		Hash: "hash1",
 	}
-
 	count = SaveRemediationsToStore(store, []RemediationTuple{remediation2})
 	if count != 1 {
-		t.Errorf("Expected to add 1 remediation with same hash but different pair, but added %d", count)
+		t.Errorf("Expected to add 1 remediation with different pair, but added %d", count)
 	}
 	if len(store.Remediations) != 2 {
 		t.Errorf("Expected store to have 2 remediations, but has %d", len(store.Remediations))
@@ -48,9 +44,7 @@ func TestSaveRemediationsToStore(t *testing.T) {
 	// Test 4: Add multiple remediations at once, some new and some duplicates
 	remediation3 := RemediationTuple{
 		Pair: []string{"word5", "word6"},
-		Hash: "hash2",
 	}
-
 	count = SaveRemediationsToStore(store, []RemediationTuple{remediation1, remediation2, remediation3})
 	if count != 1 {
 		t.Errorf("Expected to add 1 new remediation when adding mix of new and duplicates, but added %d", count)
@@ -68,10 +62,8 @@ func TestSaveRemediationsToStore(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		initialRemediations[i] = RemediationTuple{
 			Pair: []string{"initial", "word" + string(rune('a'+i))},
-			Hash: "hash" + string(rune('a'+i)),
 		}
 	}
-
 	SaveRemediationsToStore(largeStore, initialRemediations)
 
 	// Try to add 50 more remediations, 25 new and 25 duplicates
@@ -84,10 +76,8 @@ func TestSaveRemediationsToStore(t *testing.T) {
 		// New remediations
 		newRemediations[i] = RemediationTuple{
 			Pair: []string{"new", "word" + string(rune('a'+i))},
-			Hash: "newhash" + string(rune('a'+i)),
 		}
 	}
-
 	count = SaveRemediationsToStore(largeStore, newRemediations)
 	if count != 25 {
 		t.Errorf("Expected to add 25 new remediations in performance test, but added %d", count)

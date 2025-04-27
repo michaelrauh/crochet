@@ -21,7 +21,7 @@ type versionedRem struct {
 type RemediationQueueStore struct {
 	queue          chan types.RemediationTuple
 	store          []versionedRem
-	existingMap    map[string]map[string]struct{}
+	existingMap    map[string]struct{} // Changed to use only pair key
 	currentVersion int64
 	mu             sync.RWMutex
 	flushSize      int
@@ -33,7 +33,7 @@ func NewRemediationQueueStore(qSize, flushSize int, flushInterval time.Duration)
 	store := &RemediationQueueStore{
 		queue:          make(chan types.RemediationTuple, qSize),
 		store:          make([]versionedRem, 0),
-		existingMap:    make(map[string]map[string]struct{}),
+		existingMap:    make(map[string]struct{}),
 		currentVersion: 0,
 		flushSize:      flushSize,
 		flushInterval:  flushInterval,
@@ -88,16 +88,11 @@ func (s *RemediationQueueStore) flush(batch []types.RemediationTuple) {
 	currentVersion := s.currentVersion
 
 	for _, r := range batch {
-		// Check if we've seen this hash before
-		if _, exists := s.existingMap[r.Hash]; !exists {
-			s.existingMap[r.Hash] = make(map[string]struct{})
-		}
-
 		// Create pair key for lookup
 		pairKey := createPairKey(r.Pair)
 
 		// Check if this specific remediation exists already
-		if _, exists := s.existingMap[r.Hash][pairKey]; !exists {
+		if _, exists := s.existingMap[pairKey]; !exists {
 			// This is a new remediation, add it to the store with the current version
 			s.store = append(s.store, versionedRem{
 				RemediationTuple: r,
@@ -105,7 +100,7 @@ func (s *RemediationQueueStore) flush(batch []types.RemediationTuple) {
 			})
 
 			// Mark it as existing in our map
-			s.existingMap[r.Hash][pairKey] = struct{}{}
+			s.existingMap[pairKey] = struct{}{}
 		}
 	}
 }

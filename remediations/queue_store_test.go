@@ -21,11 +21,11 @@ func TestRemediationQueueStore_Deduplication(t *testing.T) {
 
 	// Create some test data with duplicates
 	testData := []types.RemediationTuple{
-		{Pair: []string{"a", "b"}, Hash: "hash1"},
-		{Pair: []string{"a", "b"}, Hash: "hash1"}, // Duplicate
-		{Pair: []string{"c", "d"}, Hash: "hash2"},
-		{Pair: []string{"e", "f"}, Hash: "hash3"},
-		{Pair: []string{"c", "d"}, Hash: "hash2"}, // Duplicate
+		{Pair: []string{"a", "b"}},
+		{Pair: []string{"a", "b"}}, // Duplicate
+		{Pair: []string{"c", "d"}},
+		{Pair: []string{"e", "f"}},
+		{Pair: []string{"c", "d"}}, // Duplicate
 	}
 
 	// Add to queue
@@ -44,7 +44,7 @@ func TestRemediationQueueStore_Deduplication(t *testing.T) {
 	assert.Equal(t, 3, len(store.store), "Should have 3 unique remediations after deduplication")
 
 	// Check the map
-	assert.Equal(t, 3, len(store.existingMap), "Should have 3 unique hashes in the map")
+	assert.Equal(t, 3, len(store.existingMap), "Should have 3 unique pair keys in the map")
 }
 
 func TestRemediationQueueStore_GetHandler(t *testing.T) {
@@ -60,9 +60,9 @@ func TestRemediationQueueStore_GetHandler(t *testing.T) {
 
 	// Create test data
 	testData := []types.RemediationTuple{
-		{Pair: []string{"a", "b"}, Hash: "hash1"},
-		{Pair: []string{"c", "d"}, Hash: "hash2"},
-		{Pair: []string{"e", "f"}, Hash: "hash3"},
+		{Pair: []string{"a", "b"}},
+		{Pair: []string{"c", "d"}},
+		{Pair: []string{"e", "f"}},
 	}
 
 	// Add to queue and ensure they're flushed
@@ -105,8 +105,8 @@ func TestRemediationQueueStore_GetHandler(t *testing.T) {
 
 	// Add more data with timeout to prevent deadlock
 	moreData := []types.RemediationTuple{
-		{Pair: []string{"g", "h"}, Hash: "hash4"},
-		{Pair: []string{"i", "j"}, Hash: "hash5"},
+		{Pair: []string{"g", "h"}},
+		{Pair: []string{"i", "j"}},
 	}
 
 	for _, r := range moreData {
@@ -155,8 +155,8 @@ func TestAddHandler(t *testing.T) {
 
 	// Test data
 	testData := []types.RemediationTuple{
-		{Pair: []string{"a", "b"}, Hash: "hash1"},
-		{Pair: []string{"c", "d"}, Hash: "hash2"},
+		{Pair: []string{"a", "b"}},
+		{Pair: []string{"c", "d"}},
 	}
 
 	// Create request body

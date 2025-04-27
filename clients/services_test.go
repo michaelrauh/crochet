@@ -100,7 +100,6 @@ func (s *RemediationsServiceClientTest) FetchRemediations(ctx context.Context, r
 	for i, pair := range request.Pairs {
 		remediationTuples[i] = types.RemediationTuple{
 			Pair: pair,
-			Hash: "", // The server will generate a hash
 		}
 	}
 

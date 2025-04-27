@@ -25,10 +25,10 @@ func setupRouter() (*gin.Engine, *RemediationQueueStore) {
 
 	// Add some test data
 	testRemediations := []types.RemediationTuple{
-		{Pair: []string{"word1", "word2"}, Hash: "hash1"},
-		{Pair: []string{"word3", "word4"}, Hash: "hash2"},
-		{Pair: []string{"word5", "word6"}, Hash: "hash3"},
-		{Pair: []string{"word1", "word2"}, Hash: "hash4"}, // Same pair, different hash
+		{Pair: []string{"word1", "word2"}},
+		{Pair: []string{"word3", "word4"}},
+		{Pair: []string{"word5", "word6"}},
+		{Pair: []string{"word1", "word2"}}, // Same pair, will be deduplicated
 	}
 
 	// Add to queue
@@ -51,7 +51,7 @@ func TestRemediationEndpoints(t *testing.T) {
 
 	// Verify initial data was added correctly
 	queueStore.mu.RLock()
-	assert.Equal(t, 4, len(queueStore.store), "Should have 4 remediations in store")
+	assert.Equal(t, 3, len(queueStore.store), "Should have 3 remediations in store (with deduplication)")
 	queueStore.mu.RUnlock()
 
 	// Test GET remediations (all)
@@ -70,7 +70,7 @@ func TestRemediationEndpoints(t *testing.T) {
 		json.Unmarshal(w.Body.Bytes(), &response)
 
 		assert.Equal(t, "ok", response.Status)
-		assert.Equal(t, 4, len(response.Remediations), "Should have all 4 remediations")
+		assert.Equal(t, 3, len(response.Remediations), "Should have 3 remediations (with deduplication)")
 
 		// Save the current version for next test
 		currentVersion := response.CurrentVersion
@@ -80,7 +80,6 @@ func TestRemediationEndpoints(t *testing.T) {
 			// Add a new remediation to increment the version
 			newRemediation := types.RemediationTuple{
 				Pair: []string{"word7", "word8"},
-				Hash: "hash5",
 			}
 			queueStore.queue <- newRemediation
 
@@ -103,15 +102,15 @@ func TestRemediationEndpoints(t *testing.T) {
 
 			assert.Equal(t, "ok", response.Status)
 			assert.Equal(t, 1, len(response.Remediations), "Should have only the new remediation")
-			assert.Equal(t, "hash5", response.Remediations[0].Hash)
+			assert.Equal(t, []string{"word7", "word8"}, response.Remediations[0].Pair)
 		})
 	})
 
 	// Test POST to add new remediations
 	t.Run("Add remediations", func(t *testing.T) {
 		newRemediations := []types.RemediationTuple{
-			{Pair: []string{"word9", "word10"}, Hash: "hash6"},
-			{Pair: []string{"word11", "word12"}, Hash: "hash7"},
+			{Pair: []string{"word9", "word10"}},
+			{Pair: []string{"word11", "word12"}},
 		}
 
 		body, _ := json.Marshal(newRemediations)
@@ -136,7 +135,7 @@ func TestRemediationEndpoints(t *testing.T) {
 
 		// Verify the store has been updated
 		queueStore.mu.RLock()
-		assert.Equal(t, 7, len(queueStore.store), "Should have 7 remediations in store")
+		assert.Equal(t, 6, len(queueStore.store), "Should have 6 remediations in store")
 		queueStore.mu.RUnlock()
 	})
 }
@@ -146,8 +145,8 @@ func TestRemediationDeduplicate(t *testing.T) {
 
 	// Try to add duplicates of existing data
 	duplicates := []types.RemediationTuple{
-		{Pair: []string{"word1", "word2"}, Hash: "hash1"}, // Exact duplicate
-		{Pair: []string{"word3", "word4"}, Hash: "hash2"}, // Exact duplicate
+		{Pair: []string{"word1", "word2"}}, // Duplicate pair
+		{Pair: []string{"word3", "word4"}}, // Duplicate pair
 	}
 
 	body, _ := json.Marshal(duplicates)
@@ -163,7 +162,7 @@ func TestRemediationDeduplicate(t *testing.T) {
 
 	// Verify store size hasn't changed (due to deduplication)
 	queueStore.mu.RLock()
-	assert.Equal(t, 4, len(queueStore.store), "Should still have 4 remediations (duplicates ignored)")
+	assert.Equal(t, 3, len(queueStore.store), "Should still have 3 remediations (duplicates ignored)")
 	queueStore.mu.RUnlock()
 }
 

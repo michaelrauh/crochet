@@ -42,7 +42,6 @@ func (s *ContextServiceClient) GetVersion(ctx context.Context) (types.VersionRes
 	return response, nil
 }
 
-// TODO fix
 func (s *ContextServiceClient) GetContext(ctx context.Context) (types.ContextDataResponse, error) {
 	response, err := s.DataClient.GenericCall(ctx, http.MethodGet, s.URL+"/version", nil)
 	if err != nil {
@@ -64,7 +63,6 @@ func (s *RemediationsServiceClient) FetchRemediations(ctx context.Context, reque
 	for i, pair := range request.Pairs {
 		remediationTuples[i] = types.RemediationTuple{
 			Pair: pair,
-			Hash: "", // The server will generate a hash
 		}
 	}
 

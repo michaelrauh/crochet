@@ -130,19 +130,16 @@ func generateCandidatesAndRemediations(
 ) ([]string, []types.RemediationTuple) {
 	candidates := []string{}
 	remediations := []types.RemediationTuple{}
-
 	for _, word := range workingVocabulary {
 		missingRequired := findMissingRequired(required, pairs, word)
 		if missingRequired != nil {
 			remediations = append(remediations, types.RemediationTuple{
 				Pair: append(missingRequired, word),
-				Hash: generateUniqueHash(append(missingRequired, word)),
 			})
 		} else {
 			candidates = append(candidates, word)
 		}
 	}
-
 	return candidates, remediations
 }
 
@@ -162,20 +159,12 @@ func findMissingRequired(required [][]string, pairs map[string]struct{}, word st
 func generateNewOrthos(candidates []string, top types.Ortho) []types.Ortho {
 	// Create a counter for generating new orthos
 	counter := NewCounter()
-
 	// Generate new orthos using the Add function - capitalized to match ortho.go
 	var result []types.Ortho
-
 	for _, word := range candidates {
 		// Generate orthos using Add function
 		newOrthos := Add(top, word, counter)
 		result = append(result, newOrthos...)
 	}
-
 	return result
-}
-
-// generateUniqueHash generates a unique hash for a pair.
-func generateUniqueHash(pair []string) string {
-	return "hash-" + strings.Join(pair, "-")
 }

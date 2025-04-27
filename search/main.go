@@ -373,19 +373,16 @@ func GenerateCandidatesAndRemediations(
 ) ([]string, []types.RemediationTuple) {
 	candidates := []string{}
 	remediations := []types.RemediationTuple{}
-
 	for _, word := range workingVocabulary {
 		missingRequired := FindMissingRequired(required, pairs, word)
 		if missingRequired != nil {
 			remediations = append(remediations, types.RemediationTuple{
 				Pair: append(missingRequired, word),
-				Hash: GenerateUniqueHash(append(missingRequired, word)),
 			})
 		} else {
 			candidates = append(candidates, word)
 		}
 	}
-
 	return candidates, remediations
 }
 
@@ -406,22 +403,14 @@ func FindMissingRequired(required [][]string, pairs map[string]struct{}, word st
 func GenerateNewOrthos(candidates []string, parent types.Ortho) []types.Ortho {
 	// Create a counter for generating new orthos
 	counter := NewCounter()
-
 	// Generate new orthos using the Add function directly - no conversion needed
 	var result []types.Ortho
-
 	for _, word := range candidates {
 		// Generate internal orthos using Add function
 		newOrthos := Add(parent, word, counter)
 		result = append(result, newOrthos...)
 	}
-
 	return result
-}
-
-// GenerateUniqueHash generates a unique hash for a pair.
-func GenerateUniqueHash(pair []string) string {
-	return "hash-" + strings.Join(pair, "-")
 }
 
 // StartWorker begins the worker loop that processes items from the queue

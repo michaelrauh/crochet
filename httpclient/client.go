@@ -153,7 +153,7 @@ func (c *GenericClient[T]) GenericCall(ctx context.Context, method, url string, 
 	body, _ := io.ReadAll(resp.Body)
 	log.Printf("Response from service %s: %s", url, string(body))
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		return result, fmt.Errorf("service error: %s, Status Code: %d", string(body), resp.StatusCode)
 	}
 

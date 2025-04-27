@@ -126,8 +126,12 @@ func main() {
 	versionClient := httpclient.NewDefaultGenericClient[types.VersionResponse]()
 	dataClient := httpclient.NewDefaultGenericClient[types.ContextDataResponse]()
 
+	remediationClient := httpclient.NewDefaultGenericClient[types.RemediationResponse]()
+	addRemediationClient := httpclient.NewDefaultGenericClient[types.AddRemediationResponse]()
+	deleteRemediationClient := httpclient.NewDefaultGenericClient[types.DeleteRemediationResponse]()
+
 	contextService := clients.NewContextService(cfg.ContextServiceURL, contextClient, versionClient, dataClient)
-	remediationsService := clients.NewRemediationsService(cfg.RemediationsServiceURL, httpClient)
+	remediationsService := clients.NewRemediationsService(cfg.RemediationsServiceURL, remediationClient, deleteRemediationClient, addRemediationClient)
 	orthosService := clients.NewOrthosService(cfg.OrthosServiceURL, httpClient)
 	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, httpClient)
 

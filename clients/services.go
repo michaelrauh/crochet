@@ -19,6 +19,13 @@ type ContextServiceClient struct {
 	DataClient    *httpclient.GenericClient[types.ContextDataResponse]
 }
 
+type RemediationsServiceClient struct {
+	URL          string
+	Client       *httpclient.GenericClient[types.RemediationResponse]
+	DeleteClient *httpclient.GenericClient[types.DeleteRemediationResponse]
+	AddClient    *httpclient.GenericClient[types.AddRemediationResponse]
+}
+
 func (s *ContextServiceClient) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
 	requestJSON, err := json.Marshal(input)
 	if err != nil {
@@ -43,22 +50,14 @@ func (s *ContextServiceClient) GetVersion(ctx context.Context) (types.VersionRes
 }
 
 func (s *ContextServiceClient) GetContext(ctx context.Context) (types.ContextDataResponse, error) {
-	response, err := s.DataClient.GenericCall(ctx, http.MethodGet, s.URL+"/version", nil)
+	response, err := s.DataClient.GenericCall(ctx, http.MethodGet, s.URL+"/context", nil)
 	if err != nil {
-		return types.ContextDataResponse{}, fmt.Errorf("error calling context version endpoint: %w", err)
+		return types.ContextDataResponse{}, fmt.Errorf("error calling context data endpoint: %w", err)
 	}
-
 	return response, nil
 }
 
-type RemediationsServiceClient struct {
-	URL    string
-	Client *httpclient.Client
-}
-
-// TODO fix
 func (s *RemediationsServiceClient) FetchRemediations(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-	// Convert pairs to a slice of RemediationTuple objects
 	remediationTuples := make([]types.RemediationTuple, len(request.Pairs))
 	for i, pair := range request.Pairs {
 		remediationTuples[i] = types.RemediationTuple{
@@ -66,111 +65,43 @@ func (s *RemediationsServiceClient) FetchRemediations(ctx context.Context, reque
 		}
 	}
 
-	// Marshal to JSON for the HTTP request body
 	requestJSON, err := json.Marshal(remediationTuples)
 	if err != nil {
 		return types.RemediationResponse{}, fmt.Errorf("error marshaling remediation request: %w", err)
 	}
 
-	// Add detailed logging
-	log.Printf("DEBUG: Making request to remediations service at URL: %s%s", s.URL, "/remediations")
-	log.Printf("DEBUG: Request body: %s", string(requestJSON))
-
-	// Make POST request to the remediations service endpoint
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/remediations", requestJSON)
-
-	// The remediations service returns a 202 Accepted status code when the request is successfully accepted
-	// This should be treated as a success, not an error
-	if serviceResp.Error != nil && serviceResp.StatusCode != http.StatusAccepted {
-		log.Printf("ERROR: Remediations service call failed: %v", serviceResp.Error)
-		log.Printf("ERROR: Response status code: %d", serviceResp.StatusCode)
-		log.Printf("ERROR: Raw response: %v", serviceResp.RawResponse)
-		return types.RemediationResponse{}, fmt.Errorf("error calling remediations service: %w", serviceResp.Error)
+	response, err := s.Client.GenericCall(ctx, http.MethodPost, s.URL+"/remediations", requestJSON)
+	if err != nil {
+		return types.RemediationResponse{}, fmt.Errorf("error calling remediations service: %w", err)
 	}
-
-	log.Printf("DEBUG: Received remediations service raw response: %v", serviceResp.RawResponse)
-	log.Printf("DEBUG: Response status code: %d", serviceResp.StatusCode)
-
-	// For empty requests, the response may be empty or have a special structure
-	// Handle this case explicitly to avoid parsing errors
-	if len(request.Pairs) == 0 {
-		log.Printf("DEBUG: No pairs were sent to remediations service - returning empty response")
-		return types.RemediationResponse{
-			Status: "success",
-			Hashes: []string{},
-		}, nil
-	}
-
-	var response types.RemediationResponse
-	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
-		log.Printf("ERROR: Failed to parse remediations response: %v", err)
-		log.Printf("ERROR: Raw response for parsing error: %#v", serviceResp.RawResponse)
-		return types.RemediationResponse{}, fmt.Errorf("error parsing remediations response: %w", err)
-	}
-
-	// If Hashes is nil, initialize it to avoid nil pointer issues elsewhere
-	if response.Hashes == nil {
-		response.Hashes = []string{}
-	}
-
-	log.Printf("DEBUG: Successfully parsed remediations response with %d hashes", len(response.Hashes))
 	return response, nil
 }
 
-// TODO fix
 func (s *RemediationsServiceClient) DeleteRemediations(ctx context.Context, hashes []string) (types.DeleteRemediationResponse, error) {
-	// Create the request body with hashes to delete
 	requestBody := map[string][]string{
 		"hashes": hashes,
 	}
 
-	// Marshal to JSON for the HTTP request
 	requestJSON, err := json.Marshal(requestBody)
 	if err != nil {
 		return types.DeleteRemediationResponse{}, fmt.Errorf("error marshaling delete remediations request: %w", err)
 	}
 
-	// Make POST request to the remediations delete endpoint
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/delete", requestJSON)
-	if serviceResp.Error != nil {
-		return types.DeleteRemediationResponse{}, fmt.Errorf("error calling remediations delete endpoint: %w", serviceResp.Error)
-	}
-
-	log.Printf("Received remediations delete response: %v", serviceResp.RawResponse)
-
-	var response types.DeleteRemediationResponse
-	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
-		return types.DeleteRemediationResponse{}, fmt.Errorf("error parsing remediations delete response: %w", err)
+	response, err := s.DeleteClient.GenericCall(ctx, http.MethodPost, s.URL+"/delete", requestJSON)
+	if err != nil {
+		return types.DeleteRemediationResponse{}, fmt.Errorf("error calling remediations delete endpoint: %w", err)
 	}
 
 	return response, nil
 }
 
-// TODO fix
 func (s *RemediationsServiceClient) AddRemediations(ctx context.Context, remediations []types.RemediationTuple) (types.AddRemediationResponse, error) {
-	// Marshal the remediations array directly to JSON for the HTTP request
 	requestJSON, err := json.Marshal(remediations)
 	if err != nil {
 		return types.AddRemediationResponse{}, fmt.Errorf("error marshaling add remediations request: %w", err)
 	}
 
-	// Make POST request to the remediations endpoint
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/remediations", requestJSON)
-
-	// The remediations service returns a 202 Accepted status code when the request is successfully accepted
-	// This should be treated as a success, not an error
-	if serviceResp.Error != nil && serviceResp.StatusCode != http.StatusAccepted {
-		log.Printf("ERROR: Remediations add service call failed: %v", serviceResp.Error)
-		log.Printf("ERROR: Response status code: %d", serviceResp.StatusCode)
-		return types.AddRemediationResponse{}, fmt.Errorf("error calling remediations add endpoint: %w", serviceResp.Error)
-	}
-
-	log.Printf("Response from service %s: %v", s.URL+"/remediations", serviceResp.RawResponse)
-
-	var response types.AddRemediationResponse
-	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
-		return types.AddRemediationResponse{}, fmt.Errorf("error parsing remediations add response: %w", err)
-	}
+	response, err := s.AddClient.GenericCall(ctx, http.MethodPost, s.URL+"/remediations", requestJSON)
 
 	return response, nil
 }
@@ -418,10 +349,12 @@ func NewContextService(url string, client *httpclient.GenericClient[types.Contex
 	}
 }
 
-func NewRemediationsService(url string, client *httpclient.Client) types.RemediationsService {
+func NewRemediationsService(url string, client *httpclient.GenericClient[types.RemediationResponse], deleteClient *httpclient.GenericClient[types.DeleteRemediationResponse], AddClient *httpclient.GenericClient[types.AddRemediationResponse]) types.RemediationsService {
 	return &RemediationsServiceClient{
-		URL:    url,
-		Client: client,
+		URL:          url,
+		Client:       client,
+		DeleteClient: deleteClient,
+		AddClient:    AddClient,
 	}
 }
 

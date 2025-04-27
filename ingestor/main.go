@@ -85,18 +85,11 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 		return
 	}
 
-	if len(processedHashes) > 0 {
-		log.Printf("Cleaning up %d processed remediation hashes", len(processedHashes))
-		deleteResp, err := remediationsService.DeleteRemediations(c.Request.Context(), processedHashes)
-		if err != nil {
-			// Log the error but continue - this is cleanup so we don't want to fail the request
-			log.Printf("Warning: Failed to delete processed remediations: %v", err)
-		} else {
-			log.Printf("Successfully deleted %d remediations", deleteResp.Count)
-		}
+	_, err = remediationsService.DeleteRemediations(c.Request.Context(), processedHashes)
+	if telemetry.LogAndError(c, err, "ingestor", "Error deleting processed remediations") {
+		return
 	}
 
-	// Return all data to the client
 	response := gin.H{
 		"status":  "success",
 		"version": contextResponse.Version,

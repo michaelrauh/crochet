@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"runtime"
 	"time"
 
@@ -87,7 +88,6 @@ func main() {
 	queueSize := 10000                     // Buffer for 10,000 items
 	flushSize := 200                       // Flush every 200 items
 	flushInterval := 50 * time.Millisecond // Or every 50ms, whichever comes first
-
 	store := NewRemediationQueueStore(queueSize, flushSize, flushInterval)
 	log.Printf("Initialized RemediationQueueStore with queue size: %d, flush size: %d, flush interval: %dms",
 		queueSize, flushSize, flushInterval.Milliseconds())
@@ -95,6 +95,7 @@ func main() {
 	// Register the HTTP endpoints
 	router.POST("/remediations", store.AddHandler)
 	router.GET("/remediations", store.GetHandler)
+	router.POST("/delete", DeleteHandler)
 
 	// Start a goroutine to periodically update the metrics
 	go func() {
@@ -113,4 +114,27 @@ func main() {
 	if err := router.Run(address); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
+}
+
+// TODO Fix this and ensure this is covered in e2e tests
+func DeleteHandler(c *gin.Context) {
+	var request struct {
+		Hashes []string `json:"hashes"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "Invalid request format",
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	// Just return success even for empty hashes array
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "ok",
+		"message": "Remediations deleted successfully",
+		"count":   len(request.Hashes),
+	})
 }

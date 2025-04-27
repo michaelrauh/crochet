@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -49,10 +51,8 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 		return
 	}
 
-	pairs := types.ExtractPairsFromSubphrases(contextResponse.NewSubphrases)
-
 	remediationResp, err := remediationsService.FetchRemediations(c.Request.Context(), types.RemediationRequest{
-		Pairs: pairs,
+		Pairs: types.ExtractPairsFromSubphrases(contextResponse.NewSubphrases),
 	})
 
 	if telemetry.LogAndError(c, err, "ingestor", "Error fetching remediations") {
@@ -62,48 +62,29 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 	processedHashes := remediationResp.Hashes
 
 	var orthosResp types.OrthosResponse
-	if len(remediationResp.Hashes) > 0 {
-		log.Printf("Fetching orthos for %d hashes...", len(remediationResp.Hashes))
-		// Get orthos by hashes (which are ortho IDs)
-		orthosResp, err = orthosService.GetOrthosByIDs(c.Request.Context(), remediationResp.Hashes)
-		if telemetry.LogAndError(c, err, "ingestor", "Error fetching orthos") {
-			log.Printf("Orthos service error details: %v", err)
-			return
-		}
-		log.Printf("Retrieved %d orthos for %d hash IDs", orthosResp.Count, len(remediationResp.Hashes))
-		// Push the retrieved orthos to work server
-		if orthosResp.Count > 0 {
-			log.Printf("Pushing %d orthos to work server...", orthosResp.Count)
-			workServerResp, err := workServerService.PushOrthos(c.Request.Context(), orthosResp.Orthos)
-			if telemetry.LogAndError(c, err, "ingestor", "Error pushing orthos to work server") {
-				log.Printf("Work server error details: %v", err)
-				return
-			}
-			log.Printf("Pushed %d orthos to work server, received %d IDs", workServerResp.Count, len(workServerResp.IDs))
-		}
-	} else {
-		log.Println("No hashes returned from remediations service")
+
+	orthosResp, err = orthosService.GetOrthosByIDs(c.Request.Context(), remediationResp.Hashes)
+	if telemetry.LogAndError(c, err, "ingestor", "Error fetching orthos") {
+		return
 	}
 
-	// Create a blank ortho as specified
-	log.Println("Creating and pushing blank ortho to work server...")
-	blankOrtho := types.Ortho{
+	_, err = workServerService.PushOrthos(c.Request.Context(), orthosResp.Orthos)
+	if telemetry.LogAndError(c, err, "ingestor", "Error pushing orthos to work server") {
+		return
+	}
+
+	// Todo: make the minimal ortho smaller
+	_, err = workServerService.PushOrthos(c.Request.Context(), []types.Ortho{types.Ortho{
 		Grid:     make(map[string]string),
 		Shape:    []int{2, 2},
 		Position: []int{0, 0},
 		Shell:    0,
-		ID:       "",
-	}
-	// Push the blank ortho to work server
-	blankOrthoArray := []types.Ortho{blankOrtho}
-	blankWorkServerResp, err := workServerService.PushOrthos(c.Request.Context(), blankOrthoArray)
+		ID:       fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))),
+	}})
 	if telemetry.LogAndError(c, err, "ingestor", "Error pushing blank ortho to work server") {
-		log.Printf("Blank ortho push error details: %v", err)
 		return
 	}
-	log.Printf("Pushed blank ortho to work server, received %d IDs", len(blankWorkServerResp.IDs))
 
-	// Clean up processed remediations - only delete the ones we've handled
 	if len(processedHashes) > 0 {
 		log.Printf("Cleaning up %d processed remediation hashes", len(processedHashes))
 		deleteResp, err := remediationsService.DeleteRemediations(c.Request.Context(), processedHashes)

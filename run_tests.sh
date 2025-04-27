@@ -43,10 +43,5 @@ cd ..
 
 # Run end-to-end test for the ingestor service
 echo "Running end-to-end tests for ingestor service..."
-echo "Note: detailed logs redirected to e2e_test.log"
-bash test_e2e.sh > e2e_test.log 2>&1 || {
-  echo "End-to-end test failed. Check e2e_test.log for details"
-  exit 1
-}
-
+bash test_e2e.sh
 echo "End-to-end tests completed successfully"

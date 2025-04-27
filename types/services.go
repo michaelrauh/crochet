@@ -2,10 +2,6 @@ package types
 
 import "context"
 
-// This file contains service interfaces but implementations moved to clients package
-// to avoid circular dependencies
-
-// ContextService defines the interface for interacting with the context service
 type ContextService interface {
 	SendMessage(ctx context.Context, input ContextInput) (ContextResponse, error)
 	GetVersion(ctx context.Context) (VersionResponse, error)
@@ -24,7 +20,6 @@ type ContextDataResponse struct {
 	Lines      [][]string `json:"lines"`
 }
 
-// RemediationsService defines the interface for interacting with the remediations service
 type RemediationsService interface {
 	FetchRemediations(ctx context.Context, request RemediationRequest) (RemediationResponse, error)
 	DeleteRemediations(ctx context.Context, hashes []string) (DeleteRemediationResponse, error)
@@ -37,7 +32,6 @@ type OrthosService interface {
 	SaveOrthos(ctx context.Context, orthos []Ortho) (OrthosSaveResponse, error)
 }
 
-// WorkServerService defines the interface for interacting with the work server
 type WorkServerService interface {
 	PushOrthos(ctx context.Context, orthos []Ortho) (WorkServerPushResponse, error)
 	Pop(ctx context.Context) (WorkServerPopResponse, error)

@@ -12,13 +12,12 @@ import (
 	"crochet/types"
 )
 
-// ContextServiceClient implements the types.ContextService interface
 type ContextServiceClient struct {
 	URL    string
 	Client *httpclient.Client
 }
 
-// SendMessage sends data to the context service and returns the response
+// TODO fix
 func (s *ContextServiceClient) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
 	// Marshal to JSON for the HTTP request
 	requestJSON, err := json.Marshal(input)
@@ -41,7 +40,7 @@ func (s *ContextServiceClient) SendMessage(ctx context.Context, input types.Cont
 	return response, nil
 }
 
-// GetVersion gets the current version from the context service
+// TODO fix
 func (s *ContextServiceClient) GetVersion(ctx context.Context) (types.VersionResponse, error) {
 	// Make GET request to the context service version endpoint
 	serviceResp := s.Client.Call(ctx, http.MethodGet, s.URL+"/version", nil)
@@ -59,7 +58,7 @@ func (s *ContextServiceClient) GetVersion(ctx context.Context) (types.VersionRes
 	return response, nil
 }
 
-// GetContext gets the current context data from the context service
+// TODO fix
 func (s *ContextServiceClient) GetContext(ctx context.Context) (types.ContextDataResponse, error) {
 	// Make GET request to the context service context data endpoint
 	serviceResp := s.Client.Call(ctx, http.MethodGet, s.URL+"/context", nil)
@@ -77,13 +76,12 @@ func (s *ContextServiceClient) GetContext(ctx context.Context) (types.ContextDat
 	return response, nil
 }
 
-// RemediationsServiceClient implements the types.RemediationsService interface
 type RemediationsServiceClient struct {
 	URL    string
 	Client *httpclient.Client
 }
 
-// FetchRemediations sends request to the remediations service and returns the response
+// TODO fix
 func (s *RemediationsServiceClient) FetchRemediations(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
 	// Convert pairs to a slice of RemediationTuple objects
 	remediationTuples := make([]types.RemediationTuple, len(request.Pairs))
@@ -145,7 +143,7 @@ func (s *RemediationsServiceClient) FetchRemediations(ctx context.Context, reque
 	return response, nil
 }
 
-// DeleteRemediations sends a request to delete specific remediations by their hashes
+// TODO fix
 func (s *RemediationsServiceClient) DeleteRemediations(ctx context.Context, hashes []string) (types.DeleteRemediationResponse, error) {
 	// Create the request body with hashes to delete
 	requestBody := map[string][]string{
@@ -174,7 +172,7 @@ func (s *RemediationsServiceClient) DeleteRemediations(ctx context.Context, hash
 	return response, nil
 }
 
-// AddRemediations sends a request to add new remediations
+// TODO fix
 func (s *RemediationsServiceClient) AddRemediations(ctx context.Context, remediations []types.RemediationTuple) (types.AddRemediationResponse, error) {
 	// Marshal the remediations array directly to JSON for the HTTP request
 	requestJSON, err := json.Marshal(remediations)
@@ -203,13 +201,12 @@ func (s *RemediationsServiceClient) AddRemediations(ctx context.Context, remedia
 	return response, nil
 }
 
-// OrthosServiceClient implements the types.OrthosService interface
 type OrthosServiceClient struct {
 	URL    string
 	Client *httpclient.Client
 }
 
-// GetOrthosByIDs sends request to the orthos service to retrieve orthos by their IDs
+// TODO fix
 func (s *OrthosServiceClient) GetOrthosByIDs(ctx context.Context, ids []string) (types.OrthosResponse, error) {
 	// Create the request body with IDs
 	requestBody := map[string][]string{
@@ -239,7 +236,7 @@ func (s *OrthosServiceClient) GetOrthosByIDs(ctx context.Context, ids []string) 
 	return response, nil
 }
 
-// SaveOrthos sends a request to save new orthos
+// TODO fix
 func (s *OrthosServiceClient) SaveOrthos(ctx context.Context, orthos []types.Ortho) (types.OrthosSaveResponse, error) {
 	// Create the request body with orthos to save
 	requestBody := map[string][]types.Ortho{
@@ -276,13 +273,12 @@ func (s *OrthosServiceClient) SaveOrthos(ctx context.Context, orthos []types.Ort
 	return response, nil
 }
 
-// WorkServerServiceClient implements the types.WorkServerService interface
 type WorkServerServiceClient struct {
 	URL    string
 	Client *httpclient.Client
 }
 
-// PushOrthos sends a request to push orthos to the work server
+// TODO Fix
 func (s *WorkServerServiceClient) PushOrthos(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
 	// Create the request body with orthos
 	requestBody := map[string][]types.Ortho{
@@ -311,7 +307,7 @@ func (s *WorkServerServiceClient) PushOrthos(ctx context.Context, orthos []types
 	return response, nil
 }
 
-// Pop gets the next work item from the work server
+// TODO Fix
 func (s *WorkServerServiceClient) Pop(ctx context.Context) (types.WorkServerPopResponse, error) {
 	// Make POST request to the work server pop endpoint
 	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/pop", nil)
@@ -330,7 +326,7 @@ func (s *WorkServerServiceClient) Pop(ctx context.Context) (types.WorkServerPopR
 	return response, nil
 }
 
-// Ack acknowledges that a work item has been processed
+// TODO fix
 func (s *WorkServerServiceClient) Ack(ctx context.Context, id string) (types.WorkServerAckResponse, error) {
 	// Create the request body with the ID to acknowledge
 	requestBody := map[string]string{
@@ -359,7 +355,7 @@ func (s *WorkServerServiceClient) Ack(ctx context.Context, id string) (types.Wor
 	return response, nil
 }
 
-// Nack marks a work item as not processed and returns it to the queue
+// TODO fix
 func (s *WorkServerServiceClient) Nack(ctx context.Context, id string) (types.WorkServerAckResponse, error) {
 	// Create the request body with the ID to negative acknowledge
 	requestBody := map[string]string{
@@ -388,13 +384,11 @@ func (s *WorkServerServiceClient) Nack(ctx context.Context, id string) (types.Wo
 	return response, nil
 }
 
-// SearchClient implements types.SearchService
 type SearchClient struct {
 	baseURL    string
 	httpClient *http.Client
 }
 
-// NewSearchClient creates a new client for the search service
 func NewSearchClient(baseURL string) types.SearchService {
 	return &SearchClient{
 		baseURL:    baseURL,
@@ -402,7 +396,7 @@ func NewSearchClient(baseURL string) types.SearchService {
 	}
 }
 
-// NewSearchClientWithHTTPClient creates a new client for the search service with a custom HTTP client
+// TODO fix
 func NewSearchClientWithHTTPClient(baseURL string, httpClient *http.Client) types.SearchService {
 	return &SearchClient{
 		baseURL:    baseURL,
@@ -410,7 +404,7 @@ func NewSearchClientWithHTTPClient(baseURL string, httpClient *http.Client) type
 	}
 }
 
-// Search sends a search request to the search service
+// TODO fix
 func (c *SearchClient) Search(ctx context.Context, request types.SearchRequest) (types.SearchResponse, error) {
 	reqBody, err := json.Marshal(request)
 	if err != nil {
@@ -441,7 +435,7 @@ func (c *SearchClient) Search(ctx context.Context, request types.SearchRequest) 
 	return searchResponse, nil
 }
 
-// NewContextService creates a new context service client
+// TODO fix
 func NewContextService(url string, client *httpclient.Client) types.ContextService {
 	return &ContextServiceClient{
 		URL:    url,
@@ -449,7 +443,6 @@ func NewContextService(url string, client *httpclient.Client) types.ContextServi
 	}
 }
 
-// NewRemediationsService creates a new remediations service client
 func NewRemediationsService(url string, client *httpclient.Client) types.RemediationsService {
 	return &RemediationsServiceClient{
 		URL:    url,
@@ -457,7 +450,6 @@ func NewRemediationsService(url string, client *httpclient.Client) types.Remedia
 	}
 }
 
-// NewOrthosService creates a new orthos service client
 func NewOrthosService(url string, client *httpclient.Client) types.OrthosService {
 	return &OrthosServiceClient{
 		URL:    url,
@@ -465,7 +457,6 @@ func NewOrthosService(url string, client *httpclient.Client) types.OrthosService
 	}
 }
 
-// NewWorkServerService creates a new work server client
 func NewWorkServerService(url string, client *httpclient.Client) types.WorkServerService {
 	return &WorkServerServiceClient{
 		URL:    url,
@@ -473,7 +464,7 @@ func NewWorkServerService(url string, client *httpclient.Client) types.WorkServe
 	}
 }
 
-// Helper function to map a raw response to a struct
+// TODO fix
 func mapResponseToStruct(rawResponse map[string]interface{}, target interface{}) error {
 	// If rawResponse is empty, try to initialize some default values
 	if len(rawResponse) == 0 {
@@ -538,8 +529,7 @@ func mapResponseToStruct(rawResponse map[string]interface{}, target interface{})
 	return nil
 }
 
-// mapResponseToOrthos is a specialized mapper for responses containing Ortho objects
-// that ensures the Grid field is properly converted to map[string]string
+// TODO fix
 func mapResponseToOrthos(rawResponse map[string]interface{}, response *types.OrthosResponse) error {
 	// Map the status, message, and count fields
 	if status, ok := rawResponse["status"].(string); ok {
@@ -607,8 +597,7 @@ func mapResponseToOrthos(rawResponse map[string]interface{}, response *types.Ort
 	return nil
 }
 
-// mapResponseToWorkServerPop is a specialized mapper for work server pop responses
-// that ensures the Ortho object's Grid field is properly converted to map[string]string
+// TODO fix
 func mapResponseToWorkServerPop(rawResponse map[string]interface{}, response *types.WorkServerPopResponse) error {
 	// Map the status and message fields
 	if status, ok := rawResponse["status"].(string); ok {

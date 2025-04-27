@@ -31,8 +31,7 @@ func NewServiceError(service string, code int, message string) *ServiceError {
 	}
 }
 
-// LogAndError logs an error and adds it to the Gin context
-// It returns true if there was an error, making it convenient for early returns
+// TODO: Fix
 func LogAndError(c *gin.Context, err error, serviceName string, message string) bool {
 	if err == nil {
 		return false

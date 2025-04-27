@@ -26,6 +26,12 @@ type RemediationsServiceClient struct {
 	AddClient    *httpclient.GenericClient[types.AddRemediationResponse]
 }
 
+type OrthosServiceClient struct {
+	URL        string
+	GetClient  *httpclient.GenericClient[types.OrthosResponse]
+	SaveClient *httpclient.GenericClient[types.OrthosSaveResponse]
+}
+
 func (s *ContextServiceClient) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
 	requestJSON, err := json.Marshal(input)
 	if err != nil {
@@ -106,73 +112,37 @@ func (s *RemediationsServiceClient) AddRemediations(ctx context.Context, remedia
 	return response, nil
 }
 
-type OrthosServiceClient struct {
-	URL    string
-	Client *httpclient.Client
-}
-
-// TODO fix
 func (s *OrthosServiceClient) GetOrthosByIDs(ctx context.Context, ids []string) (types.OrthosResponse, error) {
-	// Create the request body with IDs
 	requestBody := map[string][]string{
 		"ids": ids,
 	}
 
-	// Marshal to JSON for the HTTP request
 	requestJSON, err := json.Marshal(requestBody)
 	if err != nil {
 		return types.OrthosResponse{}, fmt.Errorf("error marshaling orthos request: %w", err)
 	}
 
-	// Make POST request to the orthos service
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/orthos/get", requestJSON)
-	if serviceResp.Error != nil {
-		return types.OrthosResponse{}, fmt.Errorf("error calling orthos service: %w", serviceResp.Error)
-	}
-
-	log.Printf("Received orthos service raw response: %v", serviceResp.RawResponse)
-
-	// Process the response manually to ensure grid values are strings
-	var response types.OrthosResponse
-	if err := mapResponseToOrthos(serviceResp.RawResponse, &response); err != nil {
-		return types.OrthosResponse{}, fmt.Errorf("error parsing orthos response: %w", err)
+	response, err := s.GetClient.GenericCall(ctx, http.MethodPost, s.URL+"/orthos/get", requestJSON)
+	if err != nil {
+		return types.OrthosResponse{}, fmt.Errorf("error calling orthos service: %w", err)
 	}
 
 	return response, nil
 }
 
-// TODO fix
 func (s *OrthosServiceClient) SaveOrthos(ctx context.Context, orthos []types.Ortho) (types.OrthosSaveResponse, error) {
-	// Create the request body with orthos to save
 	requestBody := map[string][]types.Ortho{
 		"orthos": orthos,
 	}
 
-	// Marshal to JSON for the HTTP request
 	requestJSON, err := json.Marshal(requestBody)
 	if err != nil {
 		return types.OrthosSaveResponse{}, fmt.Errorf("error marshaling save orthos request: %w", err)
 	}
 
-	// Log the request for tracing
-	log.Printf("Making request to orthos service: %s with %d orthos", s.URL+"/orthos", len(orthos))
-
-	// Make POST request to the orthos service save endpoint
-	// Ensure context is passed through for proper trace propagation
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/orthos", requestJSON)
-	if serviceResp.Error != nil {
-		log.Printf("ERROR: Orthos save service call failed: %v", serviceResp.Error)
-		log.Printf("ERROR: Response status code: %d", serviceResp.StatusCode)
-		return types.OrthosSaveResponse{}, fmt.Errorf("error calling orthos save endpoint: %w", serviceResp.Error)
-	}
-
-	log.Printf("Received orthos save response with status code: %d", serviceResp.StatusCode)
-	log.Printf("Received orthos save raw response: %v", serviceResp.RawResponse)
-
-	var response types.OrthosSaveResponse
-	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
-		log.Printf("ERROR: Failed to parse orthos save response: %v", err)
-		return types.OrthosSaveResponse{}, fmt.Errorf("error parsing orthos save response: %w", err)
+	response, err := s.SaveClient.GenericCall(ctx, http.MethodPost, s.URL+"/orthos", requestJSON)
+	if err != nil {
+		return types.OrthosSaveResponse{}, fmt.Errorf("error calling orthos save endpoint: %w", err)
 	}
 
 	return response, nil
@@ -358,10 +328,11 @@ func NewRemediationsService(url string, client *httpclient.GenericClient[types.R
 	}
 }
 
-func NewOrthosService(url string, client *httpclient.Client) types.OrthosService {
+func NewOrthosService(url string, getClient *httpclient.GenericClient[types.OrthosResponse], saveClient *httpclient.GenericClient[types.OrthosSaveResponse]) types.OrthosService {
 	return &OrthosServiceClient{
-		URL:    url,
-		Client: client,
+		URL:        url,
+		GetClient:  getClient,
+		SaveClient: saveClient,
 	}
 }
 

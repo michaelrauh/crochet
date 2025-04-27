@@ -38,8 +38,11 @@ func DefaultClientOptions() ClientOptions {
 	}
 }
 
-// Client provides methods for making HTTP requests to external services
 type Client struct {
+	httpClient *http.Client
+}
+
+type GenericClient[T any] struct {
 	httpClient *http.Client
 }
 
@@ -48,7 +51,6 @@ func New(timeout time.Duration) *Client {
 	return &Client{}
 }
 
-// NewClient creates a new HTTP client with OpenTelemetry instrumentation
 func NewClient(options ClientOptions) *Client {
 	// Create client with OpenTelemetry instrumentation
 	client := &http.Client{
@@ -61,12 +63,32 @@ func NewClient(options ClientOptions) *Client {
 	}
 }
 
+func NewGenericClient(options ClientOptions) *GenericClient[any] {
+	client := &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Timeout:   options.ClientTimeout,
+	}
+
+	return &GenericClient[any]{
+		httpClient: client,
+	}
+}
+
 // NewDefaultClient creates a new HTTP client with default options
 func NewDefaultClient() *Client {
 	return NewClient(DefaultClientOptions())
 }
 
-// Call makes an HTTP request to an external service and returns a structured response
+func NewDefaultGenericClient[T any]() *GenericClient[T] {
+	return &GenericClient[T]{
+		httpClient: &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Timeout:   DefaultClientOptions().ClientTimeout,
+		},
+	}
+}
+
+// TODO remove
 func (c *Client) Call(ctx context.Context, method, url string, payload []byte) ServiceResponse {
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(payload))
 	if err != nil {
@@ -109,4 +131,36 @@ func (c *Client) Call(ctx context.Context, method, url string, payload []byte) S
 		StatusCode:  resp.StatusCode,
 		Error:       nil,
 	}
+}
+
+// TODO simplify
+func (c *GenericClient[T]) GenericCall(ctx context.Context, method, url string, payload []byte) (T, error) {
+	var result T
+
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(payload))
+	if err != nil {
+		return result, fmt.Errorf("error creating request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return result, fmt.Errorf("error calling service: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("Response from service %s: %s", url, string(body))
+
+	if resp.StatusCode != http.StatusOK {
+		return result, fmt.Errorf("service error: %s, Status Code: %d", string(body), resp.StatusCode)
+	}
+
+	// Parse JSON into the generic type T
+	if err := json.Unmarshal(body, &result); err != nil {
+		return result, fmt.Errorf("invalid response: %w", err)
+	}
+
+	return result, nil
 }

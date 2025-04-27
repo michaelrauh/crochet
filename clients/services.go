@@ -13,8 +13,10 @@ import (
 )
 
 type ContextServiceClient struct {
-	URL    string
-	Client *httpclient.Client
+	URL           string
+	Client        *httpclient.GenericClient[types.ContextResponse]
+	VersionClient *httpclient.GenericClient[types.VersionResponse]
+	DataClient    *httpclient.GenericClient[types.ContextDataResponse]
 }
 
 func (s *ContextServiceClient) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
@@ -23,36 +25,18 @@ func (s *ContextServiceClient) SendMessage(ctx context.Context, input types.Cont
 		return types.ContextResponse{}, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/input", requestJSON)
-	if serviceResp.Error != nil {
-		return types.ContextResponse{}, fmt.Errorf("service call failed: %w", serviceResp.Error)
-	}
-
-	var response types.ContextResponse
-	rawResponseBytes, err := json.Marshal(serviceResp.RawResponse)
+	response, err := s.Client.GenericCall(ctx, http.MethodPost, s.URL+"/input", requestJSON)
 	if err != nil {
-		return types.ContextResponse{}, fmt.Errorf("error marshaling raw response: %w", err)
-	}
-	if err := json.Unmarshal(rawResponseBytes, &response); err != nil {
-		return types.ContextResponse{}, fmt.Errorf("error unmarshaling service response: %w", err)
+		return types.ContextResponse{}, fmt.Errorf("service call failed: %w", err)
 	}
 
 	return response, nil
 }
 
-// TODO fix
 func (s *ContextServiceClient) GetVersion(ctx context.Context) (types.VersionResponse, error) {
-	// Make GET request to the context service version endpoint
-	serviceResp := s.Client.Call(ctx, http.MethodGet, s.URL+"/version", nil)
-	if serviceResp.Error != nil {
-		return types.VersionResponse{}, fmt.Errorf("error calling context version endpoint: %w", serviceResp.Error)
-	}
-
-	log.Printf("Received context version response: %v", serviceResp.RawResponse)
-
-	var response types.VersionResponse
-	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
-		return types.VersionResponse{}, fmt.Errorf("error parsing context version response: %w", err)
+	response, err := s.VersionClient.GenericCall(ctx, http.MethodGet, s.URL+"/version", nil)
+	if err != nil {
+		return types.VersionResponse{}, fmt.Errorf("error calling context version endpoint: %w", err)
 	}
 
 	return response, nil
@@ -60,17 +44,9 @@ func (s *ContextServiceClient) GetVersion(ctx context.Context) (types.VersionRes
 
 // TODO fix
 func (s *ContextServiceClient) GetContext(ctx context.Context) (types.ContextDataResponse, error) {
-	// Make GET request to the context service context data endpoint
-	serviceResp := s.Client.Call(ctx, http.MethodGet, s.URL+"/context", nil)
-	if serviceResp.Error != nil {
-		return types.ContextDataResponse{}, fmt.Errorf("error calling context data endpoint: %w", serviceResp.Error)
-	}
-
-	log.Printf("Received context data response: %v", serviceResp.RawResponse)
-
-	var response types.ContextDataResponse
-	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
-		return types.ContextDataResponse{}, fmt.Errorf("error parsing context data response: %w", err)
+	response, err := s.DataClient.GenericCall(ctx, http.MethodGet, s.URL+"/version", nil)
+	if err != nil {
+		return types.ContextDataResponse{}, fmt.Errorf("error calling context version endpoint: %w", err)
 	}
 
 	return response, nil
@@ -435,11 +411,12 @@ func (c *SearchClient) Search(ctx context.Context, request types.SearchRequest) 
 	return searchResponse, nil
 }
 
-// TODO fix
-func NewContextService(url string, client *httpclient.Client) types.ContextService {
+func NewContextService(url string, client *httpclient.GenericClient[types.ContextResponse], versionClient *httpclient.GenericClient[types.VersionResponse], dataClient *httpclient.GenericClient[types.ContextDataResponse]) types.ContextService {
 	return &ContextServiceClient{
-		URL:    url,
-		Client: client,
+		URL:           url,
+		Client:        client,
+		VersionClient: versionClient,
+		DataClient:    dataClient,
 	}
 }
 

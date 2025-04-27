@@ -684,8 +684,13 @@ func main() {
 	// Initialize HTTP client for service communication with tracing
 	httpClient := httpclient.NewDefaultClient()
 
+	// Initialize generic clients for context service
+	contextClient := httpclient.NewDefaultGenericClient[types.ContextResponse]()
+	versionClient := httpclient.NewDefaultGenericClient[types.VersionResponse]()
+	dataClient := httpclient.NewDefaultGenericClient[types.ContextDataResponse]()
+
 	// Initialize service clients
-	contextService := clients.NewContextService(cfg.ContextServiceURL, httpClient)
+	contextService := clients.NewContextService(cfg.ContextServiceURL, contextClient, versionClient, dataClient)
 	orthosService := clients.NewOrthosService(cfg.OrthosServiceURL, httpClient)
 	remediationsService := clients.NewRemediationsService(cfg.RemediationsServiceURL, httpClient)
 	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, httpClient)

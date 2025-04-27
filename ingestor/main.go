@@ -122,8 +122,11 @@ func main() {
 		cfg.DialTimeout, cfg.DialKeepAlive, cfg.MaxIdleConns, cfg.ClientTimeout)
 
 	httpClient := httpclient.NewDefaultClient()
+	contextClient := httpclient.NewDefaultGenericClient[types.ContextResponse]()
+	versionClient := httpclient.NewDefaultGenericClient[types.VersionResponse]()
+	dataClient := httpclient.NewDefaultGenericClient[types.ContextDataResponse]()
 
-	contextService := clients.NewContextService(cfg.ContextServiceURL, httpClient)
+	contextService := clients.NewContextService(cfg.ContextServiceURL, contextClient, versionClient, dataClient)
 	remediationsService := clients.NewRemediationsService(cfg.RemediationsServiceURL, httpClient)
 	orthosService := clients.NewOrthosService(cfg.OrthosServiceURL, httpClient)
 	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, httpClient)

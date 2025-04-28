@@ -675,10 +675,10 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
+        "x": 0,
         "y": 32
       },
-      "id": 19,
+      "id": 29,
       "options": {
         "legend": {
           "calcs": ["mean", "max"],
@@ -691,19 +691,19 @@
           "sort": "none"
         }
       },
-      "title": "Total Orthos",
+      "title": "Total Remediations",
       "type": "timeseries",
       "targets": [
         {
           "datasource": "Prometheus",
           "editorMode": "code",
-          "expr": "orthos_total_count",
-          "legendFormat": "Total Orthos",
+          "expr": "remediations_total_count",
+          "legendFormat": "Total Remediations",
           "range": true,
           "refId": "A"
         }
       ],
-      "description": "Total number of orthos currently stored in the service"
+      "description": "Total number of remediations currently stored in the service"
     },
     {
       "datasource": {
@@ -944,97 +944,6 @@
               }
             ]
           },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 48
-      },
-      "id": 18,
-      "options": {
-        "legend": {
-          "calcs": ["mean", "max"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "title": "Items Found by Shape×Position",
-      "type": "timeseries",
-      "targets": [
-        {
-          "datasource": "Prometheus",
-          "editorMode": "code",
-          "expr": "sum by(shape, position) (crochet_ortho_items_found_by_shape_position_total)",
-          "legendFormat": "{{shape}} at {{position}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "description": "Total number of items found in searches by ortho shape and position"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
           "unit": "short",
           "decimals": 2
         },
@@ -1065,13 +974,271 @@
         {
           "datasource": "Prometheus",
           "editorMode": "code",
-          "expr": "sum by(shape, position) (crochet_ortho_items_found_by_shape_position_total) / sum by(shape, position) (crochet_ortho_searches_by_shape_position_total)",
+          "expr": "sum by(shape, position) (rate(crochet_ortho_items_found_by_shape_position_total[5m])) / sum by(shape, position) (rate(crochet_ortho_searches_by_shape_position_total[5m]))",
           "legendFormat": "{{shape}} at {{position}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "description": "Average number of items found per search, calculated by shape and position"
+      "description": "Average number of items found per search over the last 5 minutes, calculated by shape and position"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.75
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 64
+      },
+      "id": 25,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "lastNotNull", "max"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "title": "Orthos Acceptance Probability by Shape×Position",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "editorMode": "code",
+          "expr": "sum by(shape, position) (rate(orthos_accepted_by_shape_position_total[5m])) / (sum by(shape, position) (rate(orthos_accepted_by_shape_position_total[5m])) + sum by(shape, position) (rate(orthos_rejected_by_shape_position_total[5m])))",
+          "legendFormat": "{{shape}} at {{position}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "description": "Shows the probability of a new ortho being accepted (not a duplicate) by shape and position. Higher values (green) mean more unique orthos are being discovered. Lower values (red) indicate more duplicates."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "percentage",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 75
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 64
+      },
+      "id": 27,
+      "options": {
+        "orientation": "auto",
+        "minVizWidth": 0,
+        "minVizHeight": 0,
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "text": {}
+      },
+      "pluginVersion": "10.0.3",
+      "title": "Current Orthos Acceptance Probability",
+      "type": "gauge",
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "editorMode": "code",
+          "expr": "sum(rate(orthos_accepted_by_shape_position_total[10m])) / (sum(rate(orthos_accepted_by_shape_position_total[10m])) + sum(rate(orthos_rejected_by_shape_position_total[10m])))",
+          "legendFormat": "Overall acceptance rate",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "description": "Shows the current probability that a new ortho will be accepted (not a duplicate). Higher values (green) indicate more unique orthos being discovered. Lower values (red) indicate more duplicates."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "area"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.75
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "min": null,
+          "max": null
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 80
+      },
+      "id": 28,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "lastNotNull", "max", "min"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "title": "Orthos Acceptance Probability Over Time",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "editorMode": "code",
+          "expr": "sum(rate(orthos_accepted_by_shape_position_total[5m])) / (sum(rate(orthos_accepted_by_shape_position_total[5m])) + sum(rate(orthos_rejected_by_shape_position_total[5m])))",
+          "legendFormat": "Overall acceptance rate",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "description": "Historical view of the probability that new orthos will be accepted (not duplicates) over time. Shows system-wide uniqueness trends."
     },
     {
       "datasource": {
@@ -1122,8 +1289,12 @@
                 "value": null
               },
               {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
                 "color": "red",
-                "value": 80
+                "value": 0.8
               }
             ]
           },
@@ -1133,11 +1304,11 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 24,
         "x": 0,
-        "y": 56
+        "y": 88
       },
-      "id": 24,
+      "id": 26,
       "options": {
         "legend": {
           "calcs": ["mean", "lastNotNull", "max"],
@@ -1150,19 +1321,27 @@
           "sort": "none"
         }
       },
-      "title": "Processed Items by Shape×Position",
+      "title": "New vs Duplicate Orthos by Shape×Position",
       "type": "timeseries",
       "targets": [
         {
           "datasource": "Prometheus",
           "editorMode": "code",
-          "expr": "sum by(shape, position) (workserver_items_processed_shape_position_total)",
-          "legendFormat": "{{shape}} at {{position}}",
+          "expr": "sum by(shape, position) (rate(orthos_accepted_by_shape_position_total[5m]))",
+          "legendFormat": "{{shape}} at {{position}} (accepted)",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": "Prometheus",
+          "editorMode": "code",
+          "expr": "sum by(shape, position) (rate(orthos_rejected_by_shape_position_total[5m]))",
+          "legendFormat": "{{shape}} at {{position}} (rejected)",
+          "range": true,
+          "refId": "B"
         }
       ],
-      "description": "Shows the time series of items processed from the queue by shape and position since the workserver started"
+      "description": "Shows the rate of accepted (new) vs rejected (duplicate) orthos by shape and position"
     }
   ],
   "refresh": "5s",

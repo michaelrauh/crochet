@@ -89,6 +89,22 @@ var (
 			Buckets: prometheus.DefBuckets,
 		},
 	)
+	// New metrics for tracking accepted orthos by shape and position
+	orthosAcceptedByShapePosition = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "orthos_accepted_by_shape_position_total",
+			Help: "Number of new orthos accepted (non-duplicate) by shape and position",
+		},
+		[]string{"shape", "position"},
+	)
+	// New metrics for tracking rejected orthos by shape and position
+	orthosRejectedByShapePosition = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "orthos_rejected_by_shape_position_total",
+			Help: "Number of orthos rejected (duplicate) by shape and position",
+		},
+		[]string{"shape", "position"},
+	)
 )
 
 func init() {
@@ -100,6 +116,8 @@ func init() {
 	prometheus.MustRegister(orthosFastPathHits)
 	prometheus.MustRegister(orthosPermanentStoreAdds)
 	prometheus.MustRegister(orthosFlushDuration)
+	prometheus.MustRegister(orthosAcceptedByShapePosition)
+	prometheus.MustRegister(orthosRejectedByShapePosition)
 }
 
 // updateOrthoMetrics updates the orthos metrics
@@ -355,6 +373,16 @@ func (s *OrthosStorage) AddOrthos(orthos []Ortho) []string {
 			s.QueueForStorage(ortho)
 			newIDs = append(newIDs, ortho.ID)
 			orthosFastPathHits.Inc()
+
+			// Update accepted metrics
+			shapeKey := fmt.Sprintf("%v", ortho.Shape)
+			posKey := fmt.Sprintf("%v", ortho.Position)
+			orthosAcceptedByShapePosition.WithLabelValues(shapeKey, posKey).Inc()
+		} else {
+			// Update rejected metrics
+			shapeKey := fmt.Sprintf("%v", ortho.Shape)
+			posKey := fmt.Sprintf("%v", ortho.Position)
+			orthosRejectedByShapePosition.WithLabelValues(shapeKey, posKey).Inc()
 		}
 	}
 

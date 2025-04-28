@@ -670,9 +670,6 @@ func main() {
 		propagation.Baggage{},
 	))
 
-	// Initialize HTTP client for service communication with tracing
-	httpClient := httpclient.NewDefaultClient()
-
 	// Initialize generic clients for context service
 	contextClient := httpclient.NewDefaultGenericClient[types.ContextResponse]()
 	versionClient := httpclient.NewDefaultGenericClient[types.VersionResponse]()
@@ -685,11 +682,15 @@ func main() {
 	getOrthosClient := httpclient.NewDefaultGenericClient[types.OrthosResponse]()
 	saveOrthosClient := httpclient.NewDefaultGenericClient[types.OrthosSaveResponse]()
 
+	pushClient := httpclient.NewDefaultGenericClient[types.WorkServerPushResponse]()
+	popClient := httpclient.NewDefaultGenericClient[types.WorkServerPopResponse]()
+	ackClient := httpclient.NewDefaultGenericClient[types.WorkServerAckResponse]()
+
 	// Initialize service clients
 	contextService := clients.NewContextService(cfg.ContextServiceURL, contextClient, versionClient, dataClient)
 	orthosService := clients.NewOrthosService(cfg.OrthosServiceURL, getOrthosClient, saveOrthosClient)
 	remediationsService := clients.NewRemediationsService(cfg.RemediationsServiceURL, remediationClient, deleteRemediationClient, addRemediationClient)
-	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, httpClient)
+	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, pushClient, popClient, ackClient)
 
 	// Initialize searchState
 	searchState = &State{

@@ -121,7 +121,6 @@ func main() {
 	log.Printf("HTTP client options: DialTimeout=%v, DialKeepAlive=%v, MaxIdleConns=%d, ClientTimeout=%v",
 		cfg.DialTimeout, cfg.DialKeepAlive, cfg.MaxIdleConns, cfg.ClientTimeout)
 
-	httpClient := httpclient.NewDefaultClient()
 	contextClient := httpclient.NewDefaultGenericClient[types.ContextResponse]()
 	versionClient := httpclient.NewDefaultGenericClient[types.VersionResponse]()
 	dataClient := httpclient.NewDefaultGenericClient[types.ContextDataResponse]()
@@ -133,10 +132,14 @@ func main() {
 	getOrthosClient := httpclient.NewDefaultGenericClient[types.OrthosResponse]()
 	saveOrthosClient := httpclient.NewDefaultGenericClient[types.OrthosSaveResponse]()
 
+	pushClient := httpclient.NewDefaultGenericClient[types.WorkServerPushResponse]()
+	popClient := httpclient.NewDefaultGenericClient[types.WorkServerPopResponse]()
+	ackClient := httpclient.NewDefaultGenericClient[types.WorkServerAckResponse]()
+
 	contextService := clients.NewContextService(cfg.ContextServiceURL, contextClient, versionClient, dataClient)
 	remediationsService := clients.NewRemediationsService(cfg.RemediationsServiceURL, remediationClient, deleteRemediationClient, addRemediationClient)
 	orthosService := clients.NewOrthosService(cfg.OrthosServiceURL, getOrthosClient, saveOrthosClient)
-	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, httpClient)
+	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, pushClient, popClient, ackClient)
 
 	router.POST("/ingest", func(c *gin.Context) {
 		c.Set("config", cfg)

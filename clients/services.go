@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 
 	"crochet/httpclient"
@@ -30,6 +29,13 @@ type OrthosServiceClient struct {
 	URL        string
 	GetClient  *httpclient.GenericClient[types.OrthosResponse]
 	SaveClient *httpclient.GenericClient[types.OrthosSaveResponse]
+}
+
+type WorkServerServiceClient struct {
+	URL        string
+	PushClient *httpclient.GenericClient[types.WorkServerPushResponse]
+	PopClient  *httpclient.GenericClient[types.WorkServerPopResponse]
+	AckClient  *httpclient.GenericClient[types.WorkServerAckResponse]
 }
 
 func (s *ContextServiceClient) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
@@ -148,112 +154,64 @@ func (s *OrthosServiceClient) SaveOrthos(ctx context.Context, orthos []types.Ort
 	return response, nil
 }
 
-type WorkServerServiceClient struct {
-	URL    string
-	Client *httpclient.Client
-}
-
-// TODO Fix
 func (s *WorkServerServiceClient) PushOrthos(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
-	// Create the request body with orthos
 	requestBody := map[string][]types.Ortho{
 		"orthos": orthos,
 	}
 
-	// Marshal to JSON for the HTTP request
 	requestJSON, err := json.Marshal(requestBody)
 	if err != nil {
 		return types.WorkServerPushResponse{}, fmt.Errorf("error marshaling work server push request: %w", err)
 	}
 
-	// Make POST request to the work server push endpoint
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/push", requestJSON)
-	if serviceResp.Error != nil {
-		return types.WorkServerPushResponse{}, fmt.Errorf("error calling work server: %w", serviceResp.Error)
-	}
-
-	log.Printf("Received work server push response: %v", serviceResp.RawResponse)
-
-	var response types.WorkServerPushResponse
-	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
-		return types.WorkServerPushResponse{}, fmt.Errorf("error parsing work server push response: %w", err)
+	response, err := s.PushClient.GenericCall(ctx, http.MethodPost, s.URL+"/push", requestJSON)
+	if err != nil {
+		return types.WorkServerPushResponse{}, fmt.Errorf("error calling work server: %w", err)
 	}
 
 	return response, nil
 }
 
-// TODO Fix
 func (s *WorkServerServiceClient) Pop(ctx context.Context) (types.WorkServerPopResponse, error) {
-	// Make POST request to the work server pop endpoint
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/pop", nil)
-	if serviceResp.Error != nil {
-		return types.WorkServerPopResponse{}, fmt.Errorf("error calling work server pop endpoint: %w", serviceResp.Error)
-	}
-
-	log.Printf("Received work server pop response: %v", serviceResp.RawResponse)
-
-	// Process the response manually to handle the Ortho object correctly
-	var response types.WorkServerPopResponse
-	if err := mapResponseToWorkServerPop(serviceResp.RawResponse, &response); err != nil {
-		return types.WorkServerPopResponse{}, fmt.Errorf("error parsing work server pop response: %w", err)
+	response, err := s.PopClient.GenericCall(ctx, http.MethodPost, s.URL+"/pop", nil)
+	if err != nil {
+		return types.WorkServerPopResponse{}, fmt.Errorf("error calling work server pop endpoint: %w", err)
 	}
 
 	return response, nil
 }
 
-// TODO fix
 func (s *WorkServerServiceClient) Ack(ctx context.Context, id string) (types.WorkServerAckResponse, error) {
-	// Create the request body with the ID to acknowledge
 	requestBody := map[string]string{
 		"id": id,
 	}
 
-	// Marshal to JSON for the HTTP request
 	requestJSON, err := json.Marshal(requestBody)
 	if err != nil {
 		return types.WorkServerAckResponse{}, fmt.Errorf("error marshaling work server ack request: %w", err)
 	}
 
-	// Make POST request to the work server ack endpoint
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/ack", requestJSON)
-	if serviceResp.Error != nil {
-		return types.WorkServerAckResponse{}, fmt.Errorf("error calling work server ack endpoint: %w", serviceResp.Error)
-	}
-
-	log.Printf("Received work server ack response: %v", serviceResp.RawResponse)
-
-	var response types.WorkServerAckResponse
-	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
-		return types.WorkServerAckResponse{}, fmt.Errorf("error parsing work server ack response: %w", err)
+	response, err := s.AckClient.GenericCall(ctx, http.MethodPost, s.URL+"/ack", requestJSON)
+	if err != nil {
+		return types.WorkServerAckResponse{}, fmt.Errorf("error calling work server ack endpoint: %w", err)
 	}
 
 	return response, nil
 }
 
-// TODO fix
 func (s *WorkServerServiceClient) Nack(ctx context.Context, id string) (types.WorkServerAckResponse, error) {
-	// Create the request body with the ID to negative acknowledge
 	requestBody := map[string]string{
 		"id": id,
 	}
 
-	// Marshal to JSON for the HTTP request
 	requestJSON, err := json.Marshal(requestBody)
 	if err != nil {
 		return types.WorkServerAckResponse{}, fmt.Errorf("error marshaling work server nack request: %w", err)
 	}
 
-	// Make POST request to the work server nack endpoint
-	serviceResp := s.Client.Call(ctx, http.MethodPost, s.URL+"/nack", requestJSON)
-	if serviceResp.Error != nil {
-		return types.WorkServerAckResponse{}, fmt.Errorf("error calling work server nack endpoint: %w", serviceResp.Error)
-	}
-
-	log.Printf("Received work server nack response: %v", serviceResp.RawResponse)
-
-	var response types.WorkServerAckResponse
-	if err := mapResponseToStruct(serviceResp.RawResponse, &response); err != nil {
-		return types.WorkServerAckResponse{}, fmt.Errorf("error parsing work server nack response: %w", err)
+	response, err := s.AckClient.GenericCall(ctx, http.MethodPost, s.URL+"/nack", requestJSON)
+	if err != nil {
+		return types.WorkServerAckResponse{}, fmt.Errorf("error calling work server nack endpoint: %w", err)
 	}
 
 	return response, nil
@@ -336,10 +294,14 @@ func NewOrthosService(url string, getClient *httpclient.GenericClient[types.Orth
 	}
 }
 
-func NewWorkServerService(url string, client *httpclient.Client) types.WorkServerService {
+func NewWorkServerService(url string, pushClient *httpclient.GenericClient[types.WorkServerPushResponse],
+	popClient *httpclient.GenericClient[types.WorkServerPopResponse],
+	ackClient *httpclient.GenericClient[types.WorkServerAckResponse]) types.WorkServerService {
 	return &WorkServerServiceClient{
-		URL:    url,
-		Client: client,
+		URL:        url,
+		PushClient: pushClient,
+		PopClient:  popClient,
+		AckClient:  ackClient,
 	}
 }
 

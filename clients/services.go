@@ -1,7 +1,6 @@
 package clients
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -36,6 +35,43 @@ type WorkServerServiceClient struct {
 	PushClient *httpclient.GenericClient[types.WorkServerPushResponse]
 	PopClient  *httpclient.GenericClient[types.WorkServerPopResponse]
 	AckClient  *httpclient.GenericClient[types.WorkServerAckResponse]
+}
+
+func NewContextService(url string, client *httpclient.GenericClient[types.ContextResponse], versionClient *httpclient.GenericClient[types.VersionResponse], dataClient *httpclient.GenericClient[types.ContextDataResponse]) types.ContextService {
+	return &ContextServiceClient{
+		URL:           url,
+		Client:        client,
+		VersionClient: versionClient,
+		DataClient:    dataClient,
+	}
+}
+
+func NewRemediationsService(url string, client *httpclient.GenericClient[types.RemediationResponse], deleteClient *httpclient.GenericClient[types.DeleteRemediationResponse], AddClient *httpclient.GenericClient[types.AddRemediationResponse]) types.RemediationsService {
+	return &RemediationsServiceClient{
+		URL:          url,
+		Client:       client,
+		DeleteClient: deleteClient,
+		AddClient:    AddClient,
+	}
+}
+
+func NewOrthosService(url string, getClient *httpclient.GenericClient[types.OrthosResponse], saveClient *httpclient.GenericClient[types.OrthosSaveResponse]) types.OrthosService {
+	return &OrthosServiceClient{
+		URL:        url,
+		GetClient:  getClient,
+		SaveClient: saveClient,
+	}
+}
+
+func NewWorkServerService(url string, pushClient *httpclient.GenericClient[types.WorkServerPushResponse],
+	popClient *httpclient.GenericClient[types.WorkServerPopResponse],
+	ackClient *httpclient.GenericClient[types.WorkServerAckResponse]) types.WorkServerService {
+	return &WorkServerServiceClient{
+		URL:        url,
+		PushClient: pushClient,
+		PopClient:  popClient,
+		AckClient:  ackClient,
+	}
 }
 
 func (s *ContextServiceClient) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
@@ -114,6 +150,9 @@ func (s *RemediationsServiceClient) AddRemediations(ctx context.Context, remedia
 	}
 
 	response, err := s.AddClient.GenericCall(ctx, http.MethodPost, s.URL+"/remediations", requestJSON)
+	if err != nil {
+		return types.AddRemediationResponse{}, fmt.Errorf("error calling add remediations endpoint: %w", err)
+	}
 
 	return response, nil
 }
@@ -215,293 +254,4 @@ func (s *WorkServerServiceClient) Nack(ctx context.Context, id string) (types.Wo
 	}
 
 	return response, nil
-}
-
-type SearchClient struct {
-	baseURL    string
-	httpClient *http.Client
-}
-
-func NewSearchClient(baseURL string) types.SearchService {
-	return &SearchClient{
-		baseURL:    baseURL,
-		httpClient: &http.Client{},
-	}
-}
-
-// TODO fix
-func NewSearchClientWithHTTPClient(baseURL string, httpClient *http.Client) types.SearchService {
-	return &SearchClient{
-		baseURL:    baseURL,
-		httpClient: httpClient,
-	}
-}
-
-// TODO fix
-func (c *SearchClient) Search(ctx context.Context, request types.SearchRequest) (types.SearchResponse, error) {
-	reqBody, err := json.Marshal(request)
-	if err != nil {
-		return types.SearchResponse{}, fmt.Errorf("error marshaling search request: %v", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/search", c.baseURL), bytes.NewBuffer(reqBody))
-	if err != nil {
-		return types.SearchResponse{}, fmt.Errorf("error creating search request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return types.SearchResponse{}, fmt.Errorf("error sending search request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return types.SearchResponse{}, fmt.Errorf("search service returned status code %d", resp.StatusCode)
-	}
-
-	var searchResponse types.SearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&searchResponse); err != nil {
-		return types.SearchResponse{}, fmt.Errorf("error decoding search response: %v", err)
-	}
-
-	return searchResponse, nil
-}
-
-func NewContextService(url string, client *httpclient.GenericClient[types.ContextResponse], versionClient *httpclient.GenericClient[types.VersionResponse], dataClient *httpclient.GenericClient[types.ContextDataResponse]) types.ContextService {
-	return &ContextServiceClient{
-		URL:           url,
-		Client:        client,
-		VersionClient: versionClient,
-		DataClient:    dataClient,
-	}
-}
-
-func NewRemediationsService(url string, client *httpclient.GenericClient[types.RemediationResponse], deleteClient *httpclient.GenericClient[types.DeleteRemediationResponse], AddClient *httpclient.GenericClient[types.AddRemediationResponse]) types.RemediationsService {
-	return &RemediationsServiceClient{
-		URL:          url,
-		Client:       client,
-		DeleteClient: deleteClient,
-		AddClient:    AddClient,
-	}
-}
-
-func NewOrthosService(url string, getClient *httpclient.GenericClient[types.OrthosResponse], saveClient *httpclient.GenericClient[types.OrthosSaveResponse]) types.OrthosService {
-	return &OrthosServiceClient{
-		URL:        url,
-		GetClient:  getClient,
-		SaveClient: saveClient,
-	}
-}
-
-func NewWorkServerService(url string, pushClient *httpclient.GenericClient[types.WorkServerPushResponse],
-	popClient *httpclient.GenericClient[types.WorkServerPopResponse],
-	ackClient *httpclient.GenericClient[types.WorkServerAckResponse]) types.WorkServerService {
-	return &WorkServerServiceClient{
-		URL:        url,
-		PushClient: pushClient,
-		PopClient:  popClient,
-		AckClient:  ackClient,
-	}
-}
-
-// TODO fix
-func mapResponseToStruct(rawResponse map[string]interface{}, target interface{}) error {
-	// If rawResponse is empty, try to initialize some default values
-	if len(rawResponse) == 0 {
-		// For common response types, initialize with empty values
-		switch v := target.(type) {
-		case *types.RemediationResponse:
-			v.Status = "success"
-			v.Hashes = []string{}
-			return nil
-		case *types.OrthosResponse:
-			v.Status = "success"
-			v.Orthos = []types.Ortho{}
-			return nil
-		case *types.OrthosSaveResponse:
-			v.Status = "success"
-			// We can't access NewIDs directly - handle this case differently
-			return nil
-		}
-	}
-
-	// Special handling for OrthosSaveResponse before general unmarshaling
-	if _, ok := target.(*types.OrthosSaveResponse); ok {
-		resp := target.(*types.OrthosSaveResponse)
-
-		if status, ok := rawResponse["status"].(string); ok {
-			resp.Status = status
-		}
-
-		if message, ok := rawResponse["message"].(string); ok {
-			resp.Message = message
-		}
-
-		if count, ok := rawResponse["count"].(float64); ok {
-			resp.Count = int(count)
-		}
-
-		// Store newIDs in a slice that we'll pass back to the caller
-		if newIDsRaw, ok := rawResponse["newIDs"].([]interface{}); ok {
-			newIDs := make([]string, len(newIDsRaw))
-			for i, id := range newIDsRaw {
-				if strID, ok := id.(string); ok {
-					newIDs[i] = strID
-				}
-			}
-			// Store in a field that actually exists
-			resp.NewIDs = newIDs
-		}
-
-		return nil
-	}
-
-	// Continue with regular marshaling for other types
-	jsonData, err := json.Marshal(rawResponse)
-	if err != nil {
-		return fmt.Errorf("error re-marshaling response: %w", err)
-	}
-
-	if err := json.Unmarshal(jsonData, target); err != nil {
-		return fmt.Errorf("error unmarshaling response: %w", err)
-	}
-
-	return nil
-}
-
-// TODO fix
-func mapResponseToOrthos(rawResponse map[string]interface{}, response *types.OrthosResponse) error {
-	// Map the status, message, and count fields
-	if status, ok := rawResponse["status"].(string); ok {
-		response.Status = status
-	}
-	if message, ok := rawResponse["message"].(string); ok {
-		response.Message = message
-	}
-	if count, ok := rawResponse["count"].(float64); ok {
-		response.Count = int(count)
-	}
-
-	// Handle the orthos array
-	if orthosRaw, ok := rawResponse["orthos"].([]interface{}); ok {
-		response.Orthos = make([]types.Ortho, len(orthosRaw))
-
-		for i, orthoRaw := range orthosRaw {
-			if orthoMap, ok := orthoRaw.(map[string]interface{}); ok {
-				// Map the basic fields
-				if id, ok := orthoMap["id"].(string); ok {
-					response.Orthos[i].ID = id
-				}
-
-				if shapeRaw, ok := orthoMap["shape"].([]interface{}); ok {
-					response.Orthos[i].Shape = make([]int, len(shapeRaw))
-					for j, dim := range shapeRaw {
-						if dimFloat, ok := dim.(float64); ok {
-							response.Orthos[i].Shape[j] = int(dimFloat)
-						}
-					}
-				}
-
-				if posRaw, ok := orthoMap["position"].([]interface{}); ok {
-					response.Orthos[i].Position = make([]int, len(posRaw))
-					for j, pos := range posRaw {
-						if posFloat, ok := pos.(float64); ok {
-							response.Orthos[i].Position[j] = int(posFloat)
-						}
-					}
-				}
-
-				if shell, ok := orthoMap["shell"].(float64); ok {
-					response.Orthos[i].Shell = int(shell)
-				}
-
-				// Convert grid from map[string]interface{} to map[string]string
-				if gridRaw, ok := orthoMap["grid"].(map[string]interface{}); ok {
-					grid := make(map[string]string)
-					for k, v := range gridRaw {
-						if strVal, ok := v.(string); ok {
-							grid[k] = strVal
-						} else {
-							// Convert non-string values to strings
-							grid[k] = fmt.Sprintf("%v", v)
-						}
-					}
-					response.Orthos[i].Grid = grid
-				} else {
-					response.Orthos[i].Grid = make(map[string]string)
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-// TODO fix
-func mapResponseToWorkServerPop(rawResponse map[string]interface{}, response *types.WorkServerPopResponse) error {
-	// Map the status and message fields
-	if status, ok := rawResponse["status"].(string); ok {
-		response.Status = status
-	}
-	if message, ok := rawResponse["message"].(string); ok {
-		response.Message = message
-	}
-	if id, ok := rawResponse["id"].(string); ok {
-		response.ID = id
-	}
-
-	// Handle the ortho object if present
-	if orthoRaw, ok := rawResponse["ortho"].(map[string]interface{}); ok && orthoRaw != nil {
-		ortho := &types.Ortho{}
-
-		// Map the basic fields
-		if id, ok := orthoRaw["id"].(string); ok {
-			ortho.ID = id
-		}
-
-		if shapeRaw, ok := orthoRaw["shape"].([]interface{}); ok {
-			ortho.Shape = make([]int, len(shapeRaw))
-			for j, dim := range shapeRaw {
-				if dimFloat, ok := dim.(float64); ok {
-					ortho.Shape[j] = int(dimFloat)
-				}
-			}
-		}
-
-		if posRaw, ok := orthoRaw["position"].([]interface{}); ok {
-			ortho.Position = make([]int, len(posRaw))
-			for j, pos := range posRaw {
-				if posFloat, ok := pos.(float64); ok {
-					ortho.Position[j] = int(posFloat)
-				}
-			}
-		}
-
-		if shell, ok := orthoRaw["shell"].(float64); ok {
-			ortho.Shell = int(shell)
-		}
-
-		// Convert grid from map[string]interface{} to map[string]string
-		if gridRaw, ok := orthoRaw["grid"].(map[string]interface{}); ok {
-			grid := make(map[string]string)
-			for k, v := range gridRaw {
-				if strVal, ok := v.(string); ok {
-					grid[k] = strVal
-				} else {
-					// Convert non-string values to strings
-					grid[k] = fmt.Sprintf("%v", v)
-				}
-			}
-			ortho.Grid = grid
-		} else {
-			ortho.Grid = make(map[string]string)
-		}
-
-		response.Ortho = ortho
-	} else {
-		response.Ortho = nil
-	}
-
-	return nil
 }

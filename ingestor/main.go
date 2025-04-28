@@ -75,7 +75,7 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 	}
 
 	// Todo: make the minimal ortho smaller
-	_, err = workServerService.PushOrthos(c.Request.Context(), []types.Ortho{types.Ortho{
+	_, err = workServerService.PushOrthos(c.Request.Context(), []types.Ortho{{
 		Grid:     make(map[string]string),
 		Shape:    []int{2, 2},
 		Position: []int{0, 0},

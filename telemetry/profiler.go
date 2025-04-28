@@ -1,7 +1,6 @@
 //go:build !test
 // +build !test
 
-// regular build file (not for tests)
 package telemetry
 
 import (
@@ -13,18 +12,13 @@ import (
 	pyroscope "github.com/grafana/pyroscope-go"
 )
 
-// ProfilerProvider wraps the pyroscope profiler
 type ProfilerProvider struct {
 	profiler *pyroscope.Profiler
 	tags     map[string]string
 	enabled  bool
 }
 
-// TODO fix
 func InitProfiler(serviceName string, pyroscopeEndpoint string) (*ProfilerProvider, error) {
-	log.Printf("Initializing Pyroscope profiler for service: %s with endpoint: %s", serviceName, pyroscopeEndpoint)
-
-	// If the endpoint is empty, create a disabled profiler
 	if pyroscopeEndpoint == "" {
 		log.Println("Pyroscope endpoint is empty, profiling is disabled")
 		return &ProfilerProvider{
@@ -34,37 +28,28 @@ func InitProfiler(serviceName string, pyroscopeEndpoint string) (*ProfilerProvid
 		}, nil
 	}
 
-	// Set GOMAXPROCS explicitly to ensure CPU profiling works correctly
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	// Enable block and mutex profiling at the system level
-	// A lower number means higher precision (more samples)
 	runtime.SetBlockProfileRate(1)     // Profile every blocking event
 	runtime.SetMutexProfileFraction(1) // Profile every mutex contention event
 
-	// Define tags to be attached to all profiles
 	tags := map[string]string{
 		"service": serviceName,
 		"env":     "development", // Can be made configurable later
 	}
 
-	// Format application name to ensure compatibility with Pyroscope UI
 	appName := serviceName // Simple name format for better UI recognition
 
-	// Configure the profiler with the supported options
 	config := pyroscope.Config{
 		ApplicationName: appName,
 		ServerAddress:   pyroscopeEndpoint,
 		Logger:          pyroscope.StandardLogger,
 		ProfileTypes: []pyroscope.ProfileType{
-			// CPU profiling
 			pyroscope.ProfileCPU,
-			// Memory profiling
 			pyroscope.ProfileAllocObjects,
 			pyroscope.ProfileAllocSpace,
 			pyroscope.ProfileInuseObjects,
 			pyroscope.ProfileInuseSpace,
-			// Block and mutex profiling
 			pyroscope.ProfileBlockCount,
 			pyroscope.ProfileBlockDuration,
 			pyroscope.ProfileMutexCount,
@@ -75,21 +60,14 @@ func InitProfiler(serviceName string, pyroscopeEndpoint string) (*ProfilerProvid
 		DisableGCRuns: false,           // Enable GC runs to ensure memory profiles are accurate
 	}
 
-	// Log configuration details
 	log.Printf("Starting Pyroscope profiler with config: %+v", config)
 	log.Printf("Block profile rate set to: %d", 1)
 	log.Printf("Mutex profile fraction set to: %d", 1)
 
-	// Try to start the profiler
 	profiler, err := pyroscope.Start(config)
 	if err != nil {
-		// Return a non-fatal error and a disabled profiler
-		log.Printf("Failed to start Pyroscope profiler: %v, continuing without profiling", err)
-		return &ProfilerProvider{
-			profiler: nil,
-			tags:     tags,
-			enabled:  false,
-		}, nil
+		// Log the error and exit the application
+		log.Fatalf("Failed to start Pyroscope profiler: %v", err)
 	}
 
 	log.Println("Pyroscope profiler successfully started")
@@ -100,17 +78,13 @@ func InitProfiler(serviceName string, pyroscopeEndpoint string) (*ProfilerProvid
 	}, nil
 }
 
-// AddTag adds a tag to the profiler
 func (pp *ProfilerProvider) AddTag(key, value string) {
 	if pp == nil || !pp.enabled {
 		return
 	}
 	pp.tags[key] = value
-	// The tags are already passed during initialization
-	// and can't be changed after in the current Pyroscope API
 }
 
-// TagWithContext adds context tags to profiling data
 func (pp *ProfilerProvider) TagWithContext(ctx context.Context, key, value string) context.Context {
 	if pp == nil || !pp.enabled {
 		return ctx
@@ -119,7 +93,6 @@ func (pp *ProfilerProvider) TagWithContext(ctx context.Context, key, value strin
 	return ctx
 }
 
-// Stop gracefully stops the profiler
 func (pp *ProfilerProvider) Stop() {
 	if pp == nil || !pp.enabled {
 		return
@@ -127,7 +100,6 @@ func (pp *ProfilerProvider) Stop() {
 	pp.profiler.Stop()
 }
 
-// StopWithTimeout is a convenience method to stop the profiler with a timeout
 func (pp *ProfilerProvider) StopWithTimeout(timeout time.Duration) {
 	if pp == nil || !pp.enabled {
 		return

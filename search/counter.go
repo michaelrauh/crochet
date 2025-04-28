@@ -177,15 +177,6 @@ func allEqual(slice []int, value int) bool {
 	return true
 }
 
-// prependToAll prepends a slice to all slices in a slice of slices.
-func prependToAll(slices [][]int, prefix []int) [][]int {
-	result := make([][]int, len(slices))
-	for i, slice := range slices {
-		result[i] = append(prefix, slice...)
-	}
-	return result
-}
-
 // VisitedMap is a global map to store visited states.
 var VisitedMap = make(map[string]interface{})
 

@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
@@ -98,4 +100,91 @@ type Validator interface {
 // LogConfig logs the configuration values for debugging
 func LogConfig(cfg interface{}) {
 	log.Printf("Configuration: %+v", cfg)
+}
+
+// DefaultContextServiceName is the default name for the context service
+const DefaultContextServiceName = "context"
+
+// DefaultContextPort is the default port for the context service
+const DefaultContextPort = 8081
+
+// DefaultContextHost is the default host for the context service
+const DefaultContextHost = "0.0.0.0"
+
+// DefaultContextJaegerEndpoint is the default endpoint for Jaeger
+const DefaultContextJaegerEndpoint = "jaeger:4317"
+
+// DefaultContextMetricsEndpoint is the default endpoint for metrics
+const DefaultContextMetricsEndpoint = "otel-collector:4317"
+
+// DefaultContextPyroscopeEndpoint is the default endpoint for Pyroscope
+const DefaultContextPyroscopeEndpoint = "http://pyroscope:4040"
+
+// DefaultContextLibSQLEndpoint is the default endpoint for libsql
+const DefaultContextLibSQLEndpoint = "http://libsql:8080"
+
+// Context contains the configuration for the context service
+type Context struct {
+	ServiceName       string
+	Port              int
+	Host              string
+	JaegerEndpoint    string
+	MetricsEndpoint   string
+	PyroscopeEndpoint string
+	LibSQLEndpoint    string
+}
+
+// NewContext creates a new context configuration with default values
+func NewContext() Context {
+	return Context{
+		ServiceName:       DefaultContextServiceName,
+		Port:              DefaultContextPort,
+		Host:              DefaultContextHost,
+		JaegerEndpoint:    DefaultContextJaegerEndpoint,
+		MetricsEndpoint:   DefaultContextMetricsEndpoint,
+		PyroscopeEndpoint: DefaultContextPyroscopeEndpoint,
+		LibSQLEndpoint:    DefaultContextLibSQLEndpoint,
+	}
+}
+
+// GetContext loads the context configuration from environment variables
+func GetContext() Context {
+	config := NewContext()
+
+	if serviceName := os.Getenv("CONTEXT_SERVICE_NAME"); serviceName != "" {
+		config.ServiceName = serviceName
+	}
+
+	if port := os.Getenv("CONTEXT_PORT"); port != "" {
+		if portInt, err := strconv.Atoi(port); err == nil {
+			config.Port = portInt
+		}
+	}
+
+	if host := os.Getenv("CONTEXT_HOST"); host != "" {
+		config.Host = host
+	}
+
+	if jaegerEndpoint := os.Getenv("CONTEXT_JAEGER_ENDPOINT"); jaegerEndpoint != "" {
+		config.JaegerEndpoint = jaegerEndpoint
+	}
+
+	if metricsEndpoint := os.Getenv("CONTEXT_METRICS_ENDPOINT"); metricsEndpoint != "" {
+		config.MetricsEndpoint = metricsEndpoint
+	}
+
+	if pyroscopeEndpoint := os.Getenv("CONTEXT_PYROSCOPE_ENDPOINT"); pyroscopeEndpoint != "" {
+		config.PyroscopeEndpoint = pyroscopeEndpoint
+	}
+
+	if libSQLEndpoint := os.Getenv("CONTEXT_LIBSQL_ENDPOINT"); libSQLEndpoint != "" {
+		config.LibSQLEndpoint = libSQLEndpoint
+	}
+
+	return config
+}
+
+// GetContextAddr returns the address for the context service
+func (c Context) GetContextAddr() string {
+	return fmt.Sprintf("%s:%d", c.Host, c.Port)
 }

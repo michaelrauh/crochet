@@ -70,6 +70,20 @@ services:
       - CONTEXT_JAEGER_ENDPOINT=jaeger:4317
       - CONTEXT_METRICS_ENDPOINT=otel-collector:4317
       - CONTEXT_PYROSCOPE_ENDPOINT=http://pyroscope:4040
+      # Database configuration options:
+      # 1. In-memory database (no persistence)
+      - "CONTEXT_LIBSQL_ENDPOINT=:memory:"
+      
+      # 2. Local SQLite file (persistence with Docker volume)
+      # - "CONTEXT_LIBSQL_ENDPOINT=/data/context.db"
+      
+      # 3. Embedded replica with sync to remote Turso database
+      # - "CONTEXT_LIBSQL_ENDPOINT=/data/context.db|https://your-db-url.turso.io|your-auth-token"
+      
+      # 4. Embedded replica with sync to remote database (no auth)
+      # - "CONTEXT_LIBSQL_ENDPOINT=/data/context.db|https://your-db-url.turso.io|none"
+    volumes:
+      - context-data:/data  # For persistent storage
     logging:
       driver: "json-file"
       options:
@@ -307,6 +321,7 @@ services:
 
 volumes:
   pyroscope-data:
+  context-data:  # For persistent storage
 
 networks:
   app-network:

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
+# Use Go work mode
+echo "Using workspace mode with Go 1.24.2..."
+go work use
+
 # Run unit tests for the ingestor service
 echo "Running unit tests for ingestor service..."
 cd ingestor
@@ -35,10 +39,8 @@ cd ..
 # Run unit tests for the clients package
 echo "Running unit tests for clients package..."
 cd clients
-# Update the go.mod file first
 go mod tidy
-# Temporarily disable workspace mode for clients test
-GOWORK=off go test -v .
+go test -v .
 cd ..
 
 # Run end-to-end test for the ingestor service

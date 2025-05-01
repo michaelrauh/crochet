@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crochet/config"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,17 +17,32 @@ func TestMain(t *testing.T) {
 			t.Errorf("main function panicked: %v", r)
 		}
 	}()
-
 	// Don't actually run main in tests - just ensure it compiles
 	// Instead, we'll test specific functions
+}
+
+func setupTestStore() {
+	// Create a test configuration
+	testConfig := config.Context{
+		ServiceName:       "context-test",
+		Port:              8081,
+		Host:              "localhost",
+		JaegerEndpoint:    "localhost:4317",
+		MetricsEndpoint:   "localhost:4317",
+		PyroscopeEndpoint: "http://localhost:4040",
+		LibSQLEndpoint:    ":memory:", // Use in-memory database for tests
+	}
+
+	// Initialize the store with test config
+	if err := initStore(testConfig); err != nil {
+		panic(err)
+	}
 }
 
 func TestVersionCounter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-
-	initStore() // Reset the store and version counter
-
+	setupTestStore() // Reset the store and version counter
 	router.POST("/input", ginHandleInput)
 
 	// First request
@@ -40,7 +56,7 @@ func TestVersionCounter(t *testing.T) {
 		t.Fatalf("expected status OK, got %v", resp.StatusCode)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -72,9 +88,7 @@ func TestVersionCounter(t *testing.T) {
 func TestGetVersion(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-
-	initStore() // Reset the store and version counter
-
+	setupTestStore() // Reset the store and version counter
 	router.GET("/version", ginGetVersion)
 
 	// Test the version endpoint
@@ -87,7 +101,7 @@ func TestGetVersion(t *testing.T) {
 		t.Fatalf("expected status OK, got %v", resp.StatusCode)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -105,7 +119,7 @@ func TestGetVersion(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	resp = w.Result()
-	var secondResponse map[string]interface{}
+	var secondResponse map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&secondResponse); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}

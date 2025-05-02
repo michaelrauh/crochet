@@ -13,6 +13,10 @@ type ContextInput struct {
 	Subphrases [][]string `mapstructure:"subphrases" json:"subphrases"`
 }
 
+type DatabaseQueueInput struct {
+	Payload []byte `mapstructure:"payload" json:"payload"`
+}
+
 // ContextResponse represents the response from the context service
 type ContextResponse struct {
 	Version       int        `mapstructure:"version" json:"version"`

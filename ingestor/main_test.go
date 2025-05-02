@@ -52,6 +52,16 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// // MockDatabaseQueueService is a testify mock for the DatabaseQueueService interface
+// type MockDatabaseQueueService struct {
+// 	mock.Mock
+// }
+
+// func (m *MockDatabaseQueueService) Push(ctx context.Context, input types.DatabaseQueueInput) (types.DatabaseQueueResponse, error) {
+// 	args := m.Called(ctx, input)
+// 	return args.Get(0).(types.DatabaseQueueResponse), args.Error(1)
+// }
+
 // MockContextService implements the updated ContextService interface
 type MockContextService struct {
 	SendMessageFunc func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error)
@@ -626,3 +636,55 @@ func TestConcurrentRequests(t *testing.T) {
 			w3.Code, http.StatusOK)
 	}
 }
+
+// func TestPostCorpus(t *testing.T) {
+// 	mockContextService := &MockContextService{
+// 		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
+// 			return types.ContextResponse{
+// 				Version: 1,
+// 			}, nil
+// 		},
+// 	}
+
+// 	mockRemediationsService := &MockRemediationsService{
+// 		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
+// 			return types.RemediationResponse{
+// 				Status: "OK",
+// 			}, nil
+// 		},
+// 	}
+
+// 	mockOrthosService := &MockOrthosService{
+// 		GetOrthosByIDsFunc: func(ctx context.Context, ids []string) (types.OrthosResponse, error) {
+// 			return types.OrthosResponse{}, nil
+// 		},
+// 	}
+
+// 	mockWorkServerService := &MockWorkServerService{
+// 		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
+// 			return types.WorkServerPushResponse{}, nil
+// 		},
+// 	}
+
+// 	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
+// 	// Missing the 'text' field
+// 	body := `{"title": "Test Title"}`
+// 	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
+// 	req.Header.Set("Content-Type", "application/json")
+// 	w := httptest.NewRecorder()
+// 	router.ServeHTTP(w, req)
+
+// 	// The request should still succeed because mapstructure will set the text field to ""
+// 	if w.Code != http.StatusOK {
+// 		t.Errorf("handler returned wrong status code: got %v want %v", w.Code, http.StatusOK)
+// 	}
+
+// 	var response map[string]interface{}
+// 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+// 		t.Errorf("json.Unmarshal failed for actual response: %v", err)
+// 	}
+
+// 	if response["status"] != "success" {
+// 		t.Errorf("unexpected response: got %v want %v", response["status"], "success")
+// 	}
+// }

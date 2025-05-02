@@ -10,5 +10,5 @@ sequenceDiagram
     Repository->>DB Queue: Push(Version)
     Repository->>DB Queue: Push(Pairs)
     Repository->>DB Queue: Push(Seed)
-    Repository->>User: Reply (202) 
-```
+    Repository->>User: Reply (202)  
+``` 

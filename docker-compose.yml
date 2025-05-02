@@ -230,6 +230,25 @@ services:
         max-size: "10m"
         max-file: "3"
   
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"   # AMQP protocol port
+      - "15672:15672" # Management UI
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    restart: always
+  
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
@@ -322,6 +341,7 @@ services:
 volumes:
   pyroscope-data:
   context-data:  # For persistent storage
+  rabbitmq-data:  # Added for RabbitMQ data persistence
 
 networks:
   app-network:

@@ -37,6 +37,14 @@ type WorkServerServiceClient struct {
 	AckClient  *httpclient.GenericClient[types.WorkServerAckResponse]
 }
 
+type RabbitMQServiceClient struct {
+	URL           string
+	ContextClient *httpclient.RabbitClient[types.ContextInput]
+	VersionClient *httpclient.RabbitClient[types.VersionInfo]
+	PairsClient   *httpclient.RabbitClient[types.Pair]
+	SeedClient    *httpclient.RabbitClient[types.Ortho]
+}
+
 func NewContextService(url string, client *httpclient.GenericClient[types.ContextResponse], versionClient *httpclient.GenericClient[types.VersionResponse], dataClient *httpclient.GenericClient[types.ContextDataResponse]) types.ContextService {
 	return &ContextServiceClient{
 		URL:           url,
@@ -71,6 +79,20 @@ func NewWorkServerService(url string, pushClient *httpclient.GenericClient[types
 		PushClient: pushClient,
 		PopClient:  popClient,
 		AckClient:  ackClient,
+	}
+}
+
+func NewRabbitMQService(url string,
+	contextClient *httpclient.RabbitClient[types.ContextInput],
+	versionClient *httpclient.RabbitClient[types.VersionInfo],
+	pairsClient *httpclient.RabbitClient[types.Pair],
+	seedClient *httpclient.RabbitClient[types.Ortho]) types.RabbitMQService {
+	return &RabbitMQServiceClient{
+		URL:           url,
+		ContextClient: contextClient,
+		VersionClient: versionClient,
+		PairsClient:   pairsClient,
+		SeedClient:    seedClient,
 	}
 }
 
@@ -254,4 +276,62 @@ func (s *WorkServerServiceClient) Nack(ctx context.Context, id string) (types.Wo
 	}
 
 	return response, nil
+}
+
+func (s *RabbitMQServiceClient) PushContext(ctx context.Context, contextInput types.ContextInput) error {
+	contextJSON, err := json.Marshal(contextInput)
+	if err != nil {
+		return fmt.Errorf("failed to marshal context input: %w", err)
+	}
+
+	if err := s.ContextClient.PushMessage(ctx, "context-queue", contextJSON); err != nil {
+		return fmt.Errorf("failed to push context to queue: %w", err)
+	}
+
+	return nil
+}
+
+func (s *RabbitMQServiceClient) PushVersion(ctx context.Context, version types.VersionInfo) error {
+	versionJSON, err := json.Marshal(version)
+	if err != nil {
+		return fmt.Errorf("failed to marshal version info: %w", err)
+	}
+
+	if err := s.VersionClient.PushMessage(ctx, "version-queue", versionJSON); err != nil {
+		return fmt.Errorf("failed to push version to queue: %w", err)
+	}
+
+	return nil
+}
+
+func (s *RabbitMQServiceClient) PushPairs(ctx context.Context, pairs []types.Pair) error {
+	// Create batch of messages
+	messages := make([][]byte, len(pairs))
+	var err error
+
+	for i, pair := range pairs {
+		messages[i], err = json.Marshal(pair)
+		if err != nil {
+			return fmt.Errorf("failed to marshal pair at index %d: %w", i, err)
+		}
+	}
+
+	if err := s.PairsClient.PushMessageBatch(ctx, "pairs-queue", messages); err != nil {
+		return fmt.Errorf("failed to push pairs to queue: %w", err)
+	}
+
+	return nil
+}
+
+func (s *RabbitMQServiceClient) PushSeed(ctx context.Context, seed types.Ortho) error {
+	seedJSON, err := json.Marshal(seed)
+	if err != nil {
+		return fmt.Errorf("failed to marshal seed ortho: %w", err)
+	}
+
+	if err := s.SeedClient.PushMessage(ctx, "seed-queue", seedJSON); err != nil {
+		return fmt.Errorf("failed to push seed ortho to queue: %w", err)
+	}
+
+	return nil
 }

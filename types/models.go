@@ -99,3 +99,14 @@ type WorkServerPushResponse struct {
 	Count   int      `mapstructure:"count" json:"count"`
 	IDs     []string `mapstructure:"ids" json:"ids"`
 }
+
+// VersionInfo represents version information for a corpus
+type VersionInfo struct {
+	Version int `json:"version"`
+}
+
+// Pair represents a pair of text lines from a corpus
+type Pair struct {
+	Left  string `json:"left"`
+	Right string `json:"right"`
+}

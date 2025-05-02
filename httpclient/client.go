@@ -120,7 +120,8 @@ func NewRabbitClient[T any](url string) (*RabbitClient[T], error) {
 
 	// Create a span for the connection setup
 	ctx := context.Background()
-	ctx, span := tracer.Start(ctx, "rabbitmq.connect")
+	var span trace.Span
+	ctx, span = tracer.Start(ctx, "rabbitmq.connect")
 	defer span.End()
 
 	// Add connection details to span
@@ -163,7 +164,8 @@ func NewRabbitClient[T any](url string) (*RabbitClient[T], error) {
 
 // DeclareQueue declares a queue to ensure it exists
 func (c *RabbitClient[T]) DeclareQueue(ctx context.Context, queueName string) error {
-	ctx, span := c.tracer.Start(ctx, "rabbitmq.declare_queue")
+	var span trace.Span
+	ctx, span = c.tracer.Start(ctx, "rabbitmq.declare_queue")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("rabbitmq.queue", queueName))
@@ -188,7 +190,8 @@ func (c *RabbitClient[T]) DeclareQueue(ctx context.Context, queueName string) er
 
 // PushMessage publishes a message to the specified queue and waits for server acknowledgement
 func (c *RabbitClient[T]) PushMessage(ctx context.Context, queueName string, message []byte) error {
-	ctx, span := c.tracer.Start(ctx, "rabbitmq.publish_message")
+	var span trace.Span
+	ctx, span = c.tracer.Start(ctx, "rabbitmq.publish_message")
 	defer span.End()
 
 	span.SetAttributes(
@@ -241,7 +244,8 @@ func (c *RabbitClient[T]) PushMessage(ctx context.Context, queueName string, mes
 
 // PushMessageBatch publishes multiple messages to the specified queue and waits for all acknowledgements
 func (c *RabbitClient[T]) PushMessageBatch(ctx context.Context, queueName string, messages [][]byte) error {
-	ctx, span := c.tracer.Start(ctx, "rabbitmq.publish_batch")
+	var span trace.Span
+	ctx, span = c.tracer.Start(ctx, "rabbitmq.publish_batch")
 	defer span.End()
 
 	span.SetAttributes(
@@ -279,6 +283,7 @@ func (c *RabbitClient[T]) PushMessageBatch(ctx context.Context, queueName string
 	// Publish all messages first
 	for i, message := range messages {
 		// Create child span for each message
+		var msgSpan trace.Span
 		publishCtx, msgSpan := c.tracer.Start(ctx, "rabbitmq.publish_batch_message")
 		msgSpan.SetAttributes(
 			attribute.Int("rabbitmq.message.index", i),
@@ -325,7 +330,8 @@ func (c *RabbitClient[T]) PushMessageBatch(ctx context.Context, queueName string
 
 // SetupConsumer prepares a channel for consuming messages with appropriate QoS settings
 func (c *RabbitClient[T]) SetupConsumer(ctx context.Context, queueName string, prefetchCount int) (<-chan amqp.Delivery, error) {
-	ctx, span := c.tracer.Start(ctx, "rabbitmq.setup_consumer")
+	var span trace.Span
+	ctx, span = c.tracer.Start(ctx, "rabbitmq.setup_consumer")
 	defer span.End()
 
 	span.SetAttributes(
@@ -381,7 +387,8 @@ func (c *RabbitClient[T]) SetupConsumer(ctx context.Context, queueName string, p
 
 // PopMessages consumes a batch of messages from the queue with individual acknowledgment control
 func (c *RabbitClient[T]) PopMessages(ctx context.Context, msgs <-chan amqp.Delivery, batchSize int) ([]MessageWithAck[T], error) {
-	ctx, span := c.tracer.Start(ctx, "rabbitmq.pop_messages")
+	var span trace.Span
+	ctx, span = c.tracer.Start(ctx, "rabbitmq.pop_messages")
 	defer span.End()
 
 	span.SetAttributes(attribute.Int("rabbitmq.batch.size", batchSize))
@@ -400,7 +407,8 @@ func (c *RabbitClient[T]) PopMessages(ctx context.Context, msgs <-chan amqp.Deli
 			}
 
 			// Create child span for message processing
-			_, msgSpan := c.tracer.Start(ctx, "rabbitmq.process_message")
+			var msgSpan trace.Span
+			_, msgSpan = c.tracer.Start(ctx, "rabbitmq.process_message")
 			msgSpan.SetAttributes(
 				attribute.Int("rabbitmq.message.index", i),
 				attribute.Int("rabbitmq.message.size", len(msg.Body)),
@@ -446,7 +454,8 @@ func (c *RabbitClient[T]) PopMessages(ctx context.Context, msgs <-chan amqp.Deli
 
 // PopMessagesFromQueue is a convenience method that sets up a consumer and pops messages
 func (c *RabbitClient[T]) PopMessagesFromQueue(ctx context.Context, queueName string, batchSize int) ([]MessageWithAck[T], error) {
-	ctx, span := c.tracer.Start(ctx, "rabbitmq.pop_messages_from_queue")
+	var span trace.Span
+	ctx, span = c.tracer.Start(ctx, "rabbitmq.pop_messages_from_queue")
 	defer span.End()
 
 	span.SetAttributes(

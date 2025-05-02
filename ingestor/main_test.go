@@ -4,18 +4,28 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"crochet/telemetry"
+	"crochet/text" // Used when testing text manipulation utilities
 	"crochet/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/mock"
 )
+
+func init() {
+	// This ensures the text package is used directly in the test file
+	// to avoid the "imported and not used" error
+	_ = text.Vocabulary("sample text")
+}
 
 func setupTestEnvironment() {
 	// Set required environment variables for tests using the new config format
@@ -52,150 +62,109 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// // MockDatabaseQueueService is a testify mock for the DatabaseQueueService interface
-// type MockDatabaseQueueService struct {
-// 	mock.Mock
-// }
-
-// func (m *MockDatabaseQueueService) Push(ctx context.Context, input types.DatabaseQueueInput) (types.DatabaseQueueResponse, error) {
-// 	args := m.Called(ctx, input)
-// 	return args.Get(0).(types.DatabaseQueueResponse), args.Error(1)
-// }
-
 // MockContextService implements the updated ContextService interface
 type MockContextService struct {
-	SendMessageFunc func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error)
-	GetVersionFunc  func(ctx context.Context) (types.VersionResponse, error)
-	GetContextFunc  func(ctx context.Context) (types.ContextDataResponse, error)
+	mock.Mock
 }
 
 func (m *MockContextService) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
-	return m.SendMessageFunc(ctx, input)
+	args := m.Called(ctx, input)
+	return args.Get(0).(types.ContextResponse), args.Error(1)
 }
 
 func (m *MockContextService) GetVersion(ctx context.Context) (types.VersionResponse, error) {
-	if m.GetVersionFunc != nil {
-		return m.GetVersionFunc(ctx)
-	}
-	// Default implementation if not provided
-	return types.VersionResponse{
-		Version: 1,
-	}, nil
+	args := m.Called(ctx)
+	return args.Get(0).(types.VersionResponse), args.Error(1)
 }
 
 func (m *MockContextService) GetContext(ctx context.Context) (types.ContextDataResponse, error) {
-	if m.GetContextFunc != nil {
-		return m.GetContextFunc(ctx)
-	}
-	// Default implementation if not provided
-	return types.ContextDataResponse{
-		Version:    1,
-		Vocabulary: []string{"mock", "vocabulary"},
-		Lines:      [][]string{{"mock", "line"}},
-	}, nil
+	args := m.Called(ctx)
+	return args.Get(0).(types.ContextDataResponse), args.Error(1)
 }
 
 // MockRemediationsService implements the updated RemediationsService interface
 type MockRemediationsService struct {
-	FetchRemediationsFunc  func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error)
-	DeleteRemediationsFunc func(ctx context.Context, hashes []string) (types.DeleteRemediationResponse, error)
-	AddRemediationsFunc    func(ctx context.Context, remediations []types.RemediationTuple) (types.AddRemediationResponse, error)
+	mock.Mock
 }
 
 func (m *MockRemediationsService) FetchRemediations(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-	return m.FetchRemediationsFunc(ctx, request)
+	args := m.Called(ctx, request)
+	return args.Get(0).(types.RemediationResponse), args.Error(1)
 }
 
 func (m *MockRemediationsService) DeleteRemediations(ctx context.Context, hashes []string) (types.DeleteRemediationResponse, error) {
-	if m.DeleteRemediationsFunc != nil {
-		return m.DeleteRemediationsFunc(ctx, hashes)
-	}
-	// Default implementation if not provided
-	return types.DeleteRemediationResponse{
-		Status:  "OK",
-		Message: "Mock remediations deleted successfully",
-		Count:   len(hashes),
-	}, nil
+	args := m.Called(ctx, hashes)
+	return args.Get(0).(types.DeleteRemediationResponse), args.Error(1)
 }
 
 func (m *MockRemediationsService) AddRemediations(ctx context.Context, remediations []types.RemediationTuple) (types.AddRemediationResponse, error) {
-	if m.AddRemediationsFunc != nil {
-		return m.AddRemediationsFunc(ctx, remediations)
-	}
-	// Default implementation if not provided
-	return types.AddRemediationResponse{
-		Status:  "OK",
-		Message: "Mock remediations added successfully",
-	}, nil
+	args := m.Called(ctx, remediations)
+	return args.Get(0).(types.AddRemediationResponse), args.Error(1)
 }
 
 // MockOrthosService implements the OrthosService interface
 type MockOrthosService struct {
-	GetOrthosByIDsFunc func(ctx context.Context, ids []string) (types.OrthosResponse, error)
-	SaveOrthosFunc     func(ctx context.Context, orthos []types.Ortho) (types.OrthosSaveResponse, error)
+	mock.Mock
 }
 
 func (m *MockOrthosService) GetOrthosByIDs(ctx context.Context, ids []string) (types.OrthosResponse, error) {
-	return m.GetOrthosByIDsFunc(ctx, ids)
+	args := m.Called(ctx, ids)
+	return args.Get(0).(types.OrthosResponse), args.Error(1)
 }
 
 func (m *MockOrthosService) SaveOrthos(ctx context.Context, orthos []types.Ortho) (types.OrthosSaveResponse, error) {
-	if m.SaveOrthosFunc != nil {
-		return m.SaveOrthosFunc(ctx, orthos)
-	}
-	// Default implementation if not provided
-	return types.OrthosSaveResponse{
-		Status:  "success",
-		Message: "Mock orthos saved successfully",
-		Count:   len(orthos),
-	}, nil
+	args := m.Called(ctx, orthos)
+	return args.Get(0).(types.OrthosSaveResponse), args.Error(1)
 }
 
 // MockWorkServerService implements the WorkServerService interface
 type MockWorkServerService struct {
-	PushOrthosFunc func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error)
-	PopFunc        func(ctx context.Context) (types.WorkServerPopResponse, error)
-	AckFunc        func(ctx context.Context, id string) (types.WorkServerAckResponse, error)
-	NackFunc       func(ctx context.Context, id string) (types.WorkServerAckResponse, error)
+	mock.Mock
 }
 
 func (m *MockWorkServerService) PushOrthos(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
-	return m.PushOrthosFunc(ctx, orthos)
+	args := m.Called(ctx, orthos)
+	return args.Get(0).(types.WorkServerPushResponse), args.Error(1)
 }
 
 func (m *MockWorkServerService) Pop(ctx context.Context) (types.WorkServerPopResponse, error) {
-	if m.PopFunc != nil {
-		return m.PopFunc(ctx)
-	}
-	// Default implementation if not provided
-	return types.WorkServerPopResponse{
-		Status:  "success",
-		Message: "Mock item popped from queue",
-		Ortho:   nil,
-		ID:      "",
-	}, nil
+	args := m.Called(ctx)
+	return args.Get(0).(types.WorkServerPopResponse), args.Error(1)
 }
 
 func (m *MockWorkServerService) Ack(ctx context.Context, id string) (types.WorkServerAckResponse, error) {
-	if m.AckFunc != nil {
-		return m.AckFunc(ctx, id)
-	}
-	// Default implementation if not provided
-	return types.WorkServerAckResponse{
-		Status:  "success",
-		Message: "Mock work item acknowledged",
-	}, nil
+	args := m.Called(ctx, id)
+	return args.Get(0).(types.WorkServerAckResponse), args.Error(1)
 }
 
 func (m *MockWorkServerService) Nack(ctx context.Context, id string) (types.WorkServerAckResponse, error) {
-	if m.NackFunc != nil {
-		return m.NackFunc(ctx, id)
-	}
-	// Default implementation if not provided
-	return types.WorkServerAckResponse{
-		Status:  "success",
-		Message: "Mock work item returned to queue",
-	}, nil
+	args := m.Called(ctx, id)
+	return args.Get(0).(types.WorkServerAckResponse), args.Error(1)
+}
+
+// MockRabbitMQService is a testify mock for the RabbitMQService interface
+type MockRabbitMQService struct {
+	mock.Mock
+}
+
+func (m *MockRabbitMQService) PushContext(ctx context.Context, contextInput types.ContextInput) error {
+	args := m.Called(ctx, contextInput)
+	return args.Error(0)
+}
+
+func (m *MockRabbitMQService) PushVersion(ctx context.Context, version types.VersionInfo) error {
+	args := m.Called(ctx, version)
+	return args.Error(0)
+}
+
+func (m *MockRabbitMQService) PushPairs(ctx context.Context, pairs []types.Pair) error {
+	args := m.Called(ctx, pairs)
+	return args.Error(0)
+}
+
+func (m *MockRabbitMQService) PushSeed(ctx context.Context, seed types.Ortho) error {
+	args := m.Called(ctx, seed)
+	return args.Error(0)
 }
 
 // setupGinRouter creates a test Gin router with the specified handlers
@@ -211,54 +180,47 @@ func setupGinRouter(contextService types.ContextService, remediationsService typ
 }
 
 func TestHandleTextInputValidJSON(t *testing.T) {
-	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
-			return types.ContextResponse{
-				Version: 1,
-				NewSubphrases: [][]string{
-					{"test", "content"},
-				},
-			}, nil
+	mockContextService := new(MockContextService)
+	mockContextService.On("SendMessage", mock.Anything, mock.AnythingOfType("types.ContextInput")).Return(types.ContextResponse{
+		Version: 1,
+		NewSubphrases: [][]string{
+			{"test", "content"},
 		},
-	}
+	}, nil)
 
-	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-			return types.RemediationResponse{
-				Status: "OK",
-				Hashes: []string{"1234567890abcdef1234567890abcdef"},
-			}, nil
-		},
-	}
+	mockRemediationsService := new(MockRemediationsService)
+	mockRemediationsService.On("FetchRemediations", mock.Anything, mock.AnythingOfType("types.RemediationRequest")).Return(types.RemediationResponse{
+		Status: "OK",
+		Hashes: []string{"1234567890abcdef1234567890abcdef"},
+	}, nil)
+	mockRemediationsService.On("DeleteRemediations", mock.Anything, mock.Anything).Return(types.DeleteRemediationResponse{
+		Status:  "success",
+		Message: "Remediations deleted successfully",
+		Count:   1,
+	}, nil)
 
-	mockOrthosService := &MockOrthosService{
-		GetOrthosByIDsFunc: func(ctx context.Context, ids []string) (types.OrthosResponse, error) {
-			return types.OrthosResponse{
-				Status: "success",
-				Count:  1,
-				Orthos: []types.Ortho{
-					{
-						ID:       "1234567890abcdef1234567890abcdef",
-						Grid:     map[string]string{"0,0": "test1", "0,1": "test2"},
-						Shape:    []int{3, 4},
-						Position: []int{5, 6},
-						Shell:    7,
-					},
-				},
-			}, nil
+	mockOrthosService := new(MockOrthosService)
+	mockOrthosService.On("GetOrthosByIDs", mock.Anything, mock.Anything).Return(types.OrthosResponse{
+		Status: "success",
+		Count:  1,
+		Orthos: []types.Ortho{
+			{
+				ID:       "1234567890abcdef1234567890abcdef",
+				Grid:     map[string]string{"0,0": "test1", "0,1": "test2"},
+				Shape:    []int{3, 4},
+				Position: []int{5, 6},
+				Shell:    7,
+			},
 		},
-	}
+	}, nil)
 
-	mockWorkServerService := &MockWorkServerService{
-		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
-			return types.WorkServerPushResponse{
-				Status:  "success",
-				Message: "Items pushed to work queue successfully",
-				Count:   len(orthos),
-				IDs:     []string{"1234567890abcdef1234567890abcdef"},
-			}, nil
-		},
-	}
+	mockWorkServerService := new(MockWorkServerService)
+	mockWorkServerService.On("PushOrthos", mock.Anything, mock.Anything).Return(types.WorkServerPushResponse{
+		Status:  "success",
+		Message: "Items pushed to work queue successfully",
+		Count:   1,
+		IDs:     []string{"1234567890abcdef1234567890abcdef"},
+	}, nil)
 
 	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 	body := `{"title": "Test Title", "text": "Test Content"}`
@@ -271,7 +233,7 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", w.Code, http.StatusOK)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Errorf("json.Unmarshal failed for actual response: %v", err)
 	}
@@ -282,29 +244,10 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 }
 
 func TestHandleTextInputInvalidJSON(t *testing.T) {
-	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
-			return types.ContextResponse{}, nil
-		},
-	}
-
-	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-			return types.RemediationResponse{}, nil
-		},
-	}
-
-	mockOrthosService := &MockOrthosService{
-		GetOrthosByIDsFunc: func(ctx context.Context, ids []string) (types.OrthosResponse, error) {
-			return types.OrthosResponse{}, nil
-		},
-	}
-
-	mockWorkServerService := &MockWorkServerService{
-		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
-			return types.WorkServerPushResponse{}, nil
-		},
-	}
+	mockContextService := new(MockContextService)
+	mockRemediationsService := new(MockRemediationsService)
+	mockOrthosService := new(MockOrthosService)
+	mockWorkServerService := new(MockWorkServerService)
 
 	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 	invalidJSON := `{title:"Invalid JSON"}`
@@ -317,7 +260,7 @@ func TestHandleTextInputInvalidJSON(t *testing.T) {
 		t.Errorf("handler returned wrong status code for invalid JSON: got %v want %v", w.Code, http.StatusBadRequest)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Errorf("json.Unmarshal failed for error response: %v", err)
 	}
@@ -328,29 +271,10 @@ func TestHandleTextInputInvalidJSON(t *testing.T) {
 }
 
 func TestHandleTextInputEmptyBody(t *testing.T) {
-	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
-			return types.ContextResponse{}, nil
-		},
-	}
-
-	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-			return types.RemediationResponse{}, nil
-		},
-	}
-
-	mockOrthosService := &MockOrthosService{
-		GetOrthosByIDsFunc: func(ctx context.Context, ids []string) (types.OrthosResponse, error) {
-			return types.OrthosResponse{}, nil
-		},
-	}
-
-	mockWorkServerService := &MockWorkServerService{
-		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
-			return types.WorkServerPushResponse{}, nil
-		},
-	}
+	mockContextService := new(MockContextService)
+	mockRemediationsService := new(MockRemediationsService)
+	mockOrthosService := new(MockOrthosService)
+	mockWorkServerService := new(MockWorkServerService)
 
 	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 	req, _ := http.NewRequest("POST", "/ingest", bytes.NewBufferString(""))
@@ -364,29 +288,10 @@ func TestHandleTextInputEmptyBody(t *testing.T) {
 }
 
 func TestHandleTextInputWrongMethod(t *testing.T) {
-	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
-			return types.ContextResponse{}, nil
-		},
-	}
-
-	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-			return types.RemediationResponse{}, nil
-		},
-	}
-
-	mockOrthosService := &MockOrthosService{
-		GetOrthosByIDsFunc: func(ctx context.Context, ids []string) (types.OrthosResponse, error) {
-			return types.OrthosResponse{}, nil
-		},
-	}
-
-	mockWorkServerService := &MockWorkServerService{
-		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
-			return types.WorkServerPushResponse{}, nil
-		},
-	}
+	mockContextService := new(MockContextService)
+	mockRemediationsService := new(MockRemediationsService)
+	mockOrthosService := new(MockOrthosService)
+	mockWorkServerService := new(MockWorkServerService)
 
 	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 	req, _ := http.NewRequest("GET", "/ingest", nil)
@@ -401,33 +306,44 @@ func TestHandleTextInputWrongMethod(t *testing.T) {
 }
 
 func TestHandleTextInputWithMissingFields(t *testing.T) {
-	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
-			return types.ContextResponse{
-				Version: 1,
-			}, nil
-		},
-	}
+	mockContextService := new(MockContextService)
+	mockContextService.On("SendMessage", mock.Anything, mock.AnythingOfType("types.ContextInput")).Return(types.ContextResponse{
+		Version: 1,
+	}, nil)
 
-	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-			return types.RemediationResponse{
-				Status: "OK",
-			}, nil
-		},
-	}
+	mockRemediationsService := new(MockRemediationsService)
+	mockRemediationsService.On("FetchRemediations", mock.Anything, mock.AnythingOfType("types.RemediationRequest")).Return(types.RemediationResponse{
+		Status: "OK",
+		Hashes: []string{"1234567890abcdef1234567890abcdef"},
+	}, nil)
+	mockRemediationsService.On("DeleteRemediations", mock.Anything, mock.Anything).Return(types.DeleteRemediationResponse{
+		Status:  "success",
+		Message: "Remediations deleted successfully",
+		Count:   1,
+	}, nil)
 
-	mockOrthosService := &MockOrthosService{
-		GetOrthosByIDsFunc: func(ctx context.Context, ids []string) (types.OrthosResponse, error) {
-			return types.OrthosResponse{}, nil
+	mockOrthosService := new(MockOrthosService)
+	mockOrthosService.On("GetOrthosByIDs", mock.Anything, mock.Anything).Return(types.OrthosResponse{
+		Status: "success",
+		Count:  1,
+		Orthos: []types.Ortho{
+			{
+				ID:       "1234567890abcdef1234567890abcdef",
+				Grid:     map[string]string{"0,0": "test1", "0,1": "test2"},
+				Shape:    []int{3, 4},
+				Position: []int{5, 6},
+				Shell:    7,
+			},
 		},
-	}
+	}, nil)
 
-	mockWorkServerService := &MockWorkServerService{
-		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
-			return types.WorkServerPushResponse{}, nil
-		},
-	}
+	mockWorkServerService := new(MockWorkServerService)
+	mockWorkServerService.On("PushOrthos", mock.Anything, mock.Anything).Return(types.WorkServerPushResponse{
+		Status:  "success",
+		Message: "Items pushed to work queue successfully",
+		Count:   1,
+		IDs:     []string{"1234567890abcdef1234567890abcdef"},
+	}, nil)
 
 	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 	// Missing the 'text' field
@@ -442,7 +358,7 @@ func TestHandleTextInputWithMissingFields(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", w.Code, http.StatusOK)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Errorf("json.Unmarshal failed for actual response: %v", err)
 	}
@@ -453,30 +369,12 @@ func TestHandleTextInputWithMissingFields(t *testing.T) {
 }
 
 func TestErrorHandlerMiddleware(t *testing.T) {
-	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
-			// Return our custom error directly - this simulates what will happen in the real service
-			return types.ContextResponse{}, telemetry.NewServiceError("ingestor", http.StatusBadGateway, "Test middleware error")
-		},
-	}
+	mockContextService := new(MockContextService)
+	mockContextService.On("SendMessage", mock.Anything, mock.AnythingOfType("types.ContextInput")).Return(types.ContextResponse{}, telemetry.NewServiceError("ingestor", http.StatusBadGateway, "Test middleware error"))
 
-	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-			return types.RemediationResponse{}, nil
-		},
-	}
-
-	mockOrthosService := &MockOrthosService{
-		GetOrthosByIDsFunc: func(ctx context.Context, ids []string) (types.OrthosResponse, error) {
-			return types.OrthosResponse{}, nil
-		},
-	}
-
-	mockWorkServerService := &MockWorkServerService{
-		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
-			return types.WorkServerPushResponse{}, nil
-		},
-	}
+	mockRemediationsService := new(MockRemediationsService)
+	mockOrthosService := new(MockOrthosService)
+	mockWorkServerService := new(MockWorkServerService)
 
 	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 	body := `{"title": "Test Title", "text": "Test Content"}`
@@ -490,7 +388,7 @@ func TestErrorHandlerMiddleware(t *testing.T) {
 		t.Errorf("middleware didn't handle custom error correctly: got %v want %v", w.Code, http.StatusBadGateway)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Errorf("json.Unmarshal failed for error response: %v", err)
 	}
@@ -509,65 +407,59 @@ func TestConcurrentRequests(t *testing.T) {
 	proceed := make(chan struct{})
 	completed := make(chan struct{})
 
-	mockContextService := &MockContextService{
-		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
-			// Signal when this function is called (first request acquired the lock)
-			select {
-			case <-proceed:
-				// Wait for the signal before proceeding - this simulates a long-running operation
-				// Then return a successful response
-				return types.ContextResponse{
-					Version: 1,
-					NewSubphrases: [][]string{
-						{"test", "content"},
-					},
-				}, nil
-			case <-time.After(5 * time.Second):
-				// Timeout to prevent test hanging indefinitely
-				t.Error("Test timed out waiting for proceed signal")
-				return types.ContextResponse{}, nil
-			}
+	mockContextService := new(MockContextService)
+	mockContextService.On("SendMessage", mock.Anything, mock.AnythingOfType("types.ContextInput")).Return(types.ContextResponse{
+		Version: 1,
+		NewSubphrases: [][]string{
+			{"test", "content"},
 		},
-	}
+	}, nil).Run(func(args mock.Arguments) {
+		// Wait for the signal before proceeding - this simulates a long-running operation
+		select {
+		case <-proceed:
+			// Then return a successful response
+			return
+		case <-time.After(5 * time.Second):
+			// Timeout to prevent test hanging indefinitely
+			t.Error("Test timed out waiting for proceed signal")
+			return
+		}
+	})
 
-	mockRemediationsService := &MockRemediationsService{
-		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-			return types.RemediationResponse{
-				Status: "OK",
-				Hashes: []string{"1234567890abcdef1234567890abcdef"},
-			}, nil
-		},
-	}
+	mockRemediationsService := new(MockRemediationsService)
+	mockRemediationsService.On("FetchRemediations", mock.Anything, mock.Anything).Return(types.RemediationResponse{
+		Status: "OK",
+		Hashes: []string{"1234567890abcdef1234567890abcdef"},
+	}, nil)
+	mockRemediationsService.On("DeleteRemediations", mock.Anything, mock.Anything).Return(types.DeleteRemediationResponse{
+		Status:  "success",
+		Message: "Remediations deleted successfully",
+		Count:   1,
+	}, nil)
 
-	mockOrthosService := &MockOrthosService{
-		GetOrthosByIDsFunc: func(ctx context.Context, ids []string) (types.OrthosResponse, error) {
-			return types.OrthosResponse{
-				Status:  "success",
-				Message: "Orthos retrieved successfully",
-				Count:   1,
-				Orthos: []types.Ortho{
-					{
-						Grid:     map[string]string{"0,0": "test1", "0,1": "test2"},
-						Shape:    []int{2, 2},
-						Position: []int{0, 0},
-						Shell:    0,
-						ID:       "test-ortho-id",
-					},
-				},
-			}, nil
+	mockOrthosService := new(MockOrthosService)
+	mockOrthosService.On("GetOrthosByIDs", mock.Anything, mock.Anything).Return(types.OrthosResponse{
+		Status:  "success",
+		Message: "Orthos retrieved successfully",
+		Count:   1,
+		Orthos: []types.Ortho{
+			{
+				Grid:     map[string]string{"0,0": "test1", "0,1": "test2"},
+				Shape:    []int{2, 2},
+				Position: []int{0, 0},
+				Shell:    0,
+				ID:       "test-ortho-id",
+			},
 		},
-	}
+	}, nil)
 
-	mockWorkServerService := &MockWorkServerService{
-		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
-			return types.WorkServerPushResponse{
-				Status:  "success",
-				Message: "Items pushed to work queue successfully",
-				Count:   len(orthos),
-				IDs:     []string{"1234567890abcdef1234567890abcdef"},
-			}, nil
-		},
-	}
+	mockWorkServerService := new(MockWorkServerService)
+	mockWorkServerService.On("PushOrthos", mock.Anything, mock.Anything).Return(types.WorkServerPushResponse{
+		Status:  "success",
+		Message: "Items pushed to work queue successfully",
+		Count:   1,
+		IDs:     []string{"1234567890abcdef1234567890abcdef"},
+	}, nil)
 
 	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
 
@@ -598,7 +490,7 @@ func TestConcurrentRequests(t *testing.T) {
 			w2.Code, http.StatusLocked)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(w2.Body).Decode(&response); err != nil {
 		t.Errorf("json.Unmarshal failed for concurrent response: %v", err)
 	}
@@ -637,54 +529,180 @@ func TestConcurrentRequests(t *testing.T) {
 	}
 }
 
-// func TestPostCorpus(t *testing.T) {
-// 	mockContextService := &MockContextService{
-// 		SendMessageFunc: func(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
-// 			return types.ContextResponse{
-// 				Version: 1,
-// 			}, nil
-// 		},
-// 	}
+func TestPostCorpus(t *testing.T) {
+	// Create test input
+	testTitle := "Test Corpus"
+	testText := "This is a test corpus. It contains multiple sentences for testing."
 
-// 	mockRemediationsService := &MockRemediationsService{
-// 		FetchRemediationsFunc: func(ctx context.Context, request types.RemediationRequest) (types.RemediationResponse, error) {
-// 			return types.RemediationResponse{
-// 				Status: "OK",
-// 			}, nil
-// 		},
-// 	}
+	// Step 1: Setup expectations with argument captures
+	var capturedContextInput types.ContextInput
+	var capturedVersion types.VersionInfo
+	var capturedPairs []types.Pair
+	var capturedSeed types.Ortho
 
-// 	mockOrthosService := &MockOrthosService{
-// 		GetOrthosByIDsFunc: func(ctx context.Context, ids []string) (types.OrthosResponse, error) {
-// 			return types.OrthosResponse{}, nil
-// 		},
-// 	}
+	// Create mock context service that captures and validates the input
+	mockContextService := new(MockContextService)
+	// Use Run to capture the input before returning
+	mockContextService.On("SendMessage", mock.Anything, mock.AnythingOfType("types.ContextInput")).
+		Run(func(args mock.Arguments) {
+			// Capture the actual input for later validation
+			capturedContextInput = args.Get(1).(types.ContextInput)
+		}).
+		Return(types.ContextResponse{
+			Version: 42, // This value shouldn't be used for the pushed version
+			NewSubphrases: [][]string{
+				{"this", "is"},
+				{"a", "test"},
+				{"corpus", "it"},
+				{"contains", "multiple"},
+			},
+		}, nil)
 
-// 	mockWorkServerService := &MockWorkServerService{
-// 		PushOrthosFunc: func(ctx context.Context, orthos []types.Ortho) (types.WorkServerPushResponse, error) {
-// 			return types.WorkServerPushResponse{}, nil
-// 		},
-// 	}
+	// Create testify mock for RabbitMQ service that captures arguments
+	mockRabbitMQService := new(MockRabbitMQService)
 
-// 	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
-// 	// Missing the 'text' field
-// 	body := `{"title": "Test Title"}`
-// 	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
-// 	req.Header.Set("Content-Type", "application/json")
-// 	w := httptest.NewRecorder()
-// 	router.ServeHTTP(w, req)
+	// 1. Expect PushContext and capture the input
+	mockRabbitMQService.On("PushContext", mock.Anything, mock.AnythingOfType("types.ContextInput")).
+		Run(func(args mock.Arguments) {
+			// No need to capture here as we've already captured it from SendMessage
+		}).
+		Return(nil)
 
-// 	// The request should still succeed because mapstructure will set the text field to ""
-// 	if w.Code != http.StatusOK {
-// 		t.Errorf("handler returned wrong status code: got %v want %v", w.Code, http.StatusOK)
-// 	}
+	// 2. Expect PushVersion and capture the version
+	mockRabbitMQService.On("PushVersion", mock.Anything, mock.AnythingOfType("types.VersionInfo")).
+		Run(func(args mock.Arguments) {
+			capturedVersion = args.Get(1).(types.VersionInfo)
+		}).
+		Return(nil)
 
-// 	var response map[string]interface{}
-// 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
-// 		t.Errorf("json.Unmarshal failed for actual response: %v", err)
-// 	}
+	// 3. Expect PushPairs and capture the pairs
+	mockRabbitMQService.On("PushPairs", mock.Anything, mock.AnythingOfType("[]types.Pair")).
+		Run(func(args mock.Arguments) {
+			capturedPairs = args.Get(1).([]types.Pair)
+		}).
+		Return(nil)
 
-// 	if response["status"] != "success" {
-// 		t.Errorf("unexpected response: got %v want %v", response["status"], "success")
-// 	}
-// }
+	// 4. Expect PushSeed and capture the seed ortho
+	mockRabbitMQService.On("PushSeed", mock.Anything, mock.AnythingOfType("types.Ortho")).
+		Run(func(args mock.Arguments) {
+			capturedSeed = args.Get(1).(types.Ortho)
+		}).
+		Return(nil)
+
+	// Set up a router with the handlePostCorpus function from main.go
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/corpora", func(c *gin.Context) {
+		handlePostCorpus(c, mockContextService, mockRabbitMQService)
+	})
+
+	// Create the request with our test input
+	requestBody := fmt.Sprintf(`{"title": "%s", "text": "%s"}`, testTitle, testText)
+	req, _ := http.NewRequest(http.MethodPost, "/corpora", bytes.NewBufferString(requestBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	// Execute the request
+	router.ServeHTTP(w, req)
+
+	// Step 2: Verify the response
+	// Check the response status code (should be 202 Accepted as per the diagram)
+	if w.Code != http.StatusAccepted {
+		t.Errorf("handler returned wrong status code: got %v want %v", w.Code, http.StatusAccepted)
+	}
+
+	// Check the response body
+	var response map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Errorf("json.Unmarshal failed for response: %v", err)
+	}
+
+	if response["status"] != "success" {
+		t.Errorf("unexpected response status: got %v want %v", response["status"], "success")
+	}
+
+	// Step 3: Verify that all the expected RabbitMQ calls were made
+	mockRabbitMQService.AssertExpectations(t)
+	mockContextService.AssertExpectations(t)
+
+	// Step 4: Now validate the captured arguments to ensure they're derived correctly from the input
+
+	// Validate Context Input
+	if capturedContextInput.Title != testTitle {
+		t.Errorf("Context title incorrect: expected '%s', got '%s'", testTitle, capturedContextInput.Title)
+	}
+
+	// Vocabulary should contain words from the test text (case-insensitive check)
+	expectedVocabSubset := []string{"this", "is", "a", "test", "corpus"}
+	for _, word := range expectedVocabSubset {
+		found := false
+		for _, vocabWord := range capturedContextInput.Vocabulary {
+			// Case-insensitive comparison
+			if strings.EqualFold(vocabWord, word) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected vocabulary to contain '%s' (case-insensitive), but it wasn't found", word)
+		}
+	}
+
+	// Subphrases should be derived from the text
+	if len(capturedContextInput.Subphrases) == 0 {
+		t.Errorf("Expected subphrases to be non-empty")
+	}
+
+	// Validate Version Info - it should be a timestamp, not the context service version
+	if capturedVersion.Version <= 0 {
+		t.Errorf("Expected version to be a positive timestamp, got %d", capturedVersion.Version)
+	}
+
+	// The version should be a unix timestamp (within a reasonable range)
+	currentTime := time.Now().Unix()
+	fiveMinutesAgo := currentTime - 300
+	if int64(capturedVersion.Version) < fiveMinutesAgo || int64(capturedVersion.Version) > currentTime {
+		t.Errorf("Version doesn't appear to be a recent timestamp. Got: %d, expected a value between %d and %d",
+			capturedVersion.Version, fiveMinutesAgo, currentTime)
+	}
+
+	// Validate Pairs
+	if len(capturedPairs) == 0 {
+		t.Errorf("Expected pairs to be non-empty")
+	}
+
+	// Verify pairs match the subphrases format from the mock response
+	expectedPairs := []types.Pair{
+		{Left: "this", Right: "is"},
+		{Left: "a", Right: "test"},
+		{Left: "corpus", Right: "it"},
+		{Left: "contains", Right: "multiple"},
+	}
+
+	for i, expectedPair := range expectedPairs {
+		pairFound := false
+		for _, pair := range capturedPairs {
+			if pair.Left == expectedPair.Left && pair.Right == expectedPair.Right {
+				pairFound = true
+				break
+			}
+		}
+		if !pairFound {
+			t.Errorf("Expected pair %d (%s, %s) not found in captured pairs",
+				i, expectedPair.Left, expectedPair.Right)
+		}
+	}
+
+	// Validate Seed Ortho
+	if capturedSeed.Shape == nil || len(capturedSeed.Shape) != 2 {
+		t.Errorf("Expected seed ortho to have shape of length 2, got %v", capturedSeed.Shape)
+	}
+
+	if capturedSeed.Position == nil || len(capturedSeed.Position) != 2 {
+		t.Errorf("Expected seed ortho to have position of length 2, got %v", capturedSeed.Position)
+	}
+
+	if capturedSeed.ID == "" {
+		t.Errorf("Expected seed ortho to have non-empty ID")
+	}
+}

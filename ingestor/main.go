@@ -99,6 +99,90 @@ func ginHandleTextInput(c *gin.Context, contextService types.ContextService, rem
 	c.JSON(http.StatusOK, response)
 }
 
+// handlePostCorpus implements the flow from post_corpora.md, handling corpus submissions using RabbitMQ
+func handlePostCorpus(c *gin.Context, contextService types.ContextService, rabbitMQService types.RabbitMQService) {
+	if !ingestMutex.TryLock() {
+		c.JSON(http.StatusLocked, gin.H{
+			"status":  "error",
+			"message": "Another ingest operation is in progress. Please try again later.",
+		})
+		return
+	}
+	defer ingestMutex.Unlock()
+
+	// Parse the incoming corpus
+	corpus, err := types.ProcessIncomingCorpus(c, "ingestor")
+	if telemetry.LogAndError(c, err, "ingestor", "Error processing incoming corpus") {
+		return
+	}
+
+	// Create context input from corpus
+	contextInput := types.ContextInput{
+		Title:      corpus.Title,
+		Vocabulary: text.Vocabulary(corpus.Text),
+		Subphrases: text.GenerateSubphrases(corpus.Text),
+	}
+
+	// Step 1: Push Context to RabbitMQ
+	err = rabbitMQService.PushContext(c.Request.Context(), contextInput)
+	if telemetry.LogAndError(c, err, "ingestor", "Error pushing context to queue") {
+		return
+	}
+
+	// Get context service response
+	contextResponse, err := contextService.SendMessage(c.Request.Context(), contextInput)
+	if telemetry.LogAndError(c, err, "ingestor", "Error sending message to context service") {
+		return
+	}
+
+	// Step 2: Push Version to RabbitMQ using timestamp instead of context version
+	currentTimestamp := int(time.Now().Unix())
+	err = rabbitMQService.PushVersion(c.Request.Context(), types.VersionInfo{
+		Version: currentTimestamp,
+	})
+	if telemetry.LogAndError(c, err, "ingestor", "Error pushing version to queue") {
+		return
+	}
+
+	// Extract pairs from subphrases
+	pairs := make([]types.Pair, 0)
+	for _, subphrase := range contextResponse.NewSubphrases {
+		if len(subphrase) >= 2 {
+			pairs = append(pairs, types.Pair{
+				Left:  subphrase[0],
+				Right: subphrase[1],
+			})
+		}
+	}
+
+	// Step 3: Push Pairs to RabbitMQ
+	err = rabbitMQService.PushPairs(c.Request.Context(), pairs)
+	if telemetry.LogAndError(c, err, "ingestor", "Error pushing pairs to queue") {
+		return
+	}
+
+	// Generate a seed ortho
+	seedOrtho := types.Ortho{
+		Grid:     make(map[string]string),
+		Shape:    []int{2, 2},
+		Position: []int{0, 0},
+		Shell:    0,
+		ID:       fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))),
+	}
+
+	// Step 4: Push Seed to RabbitMQ
+	err = rabbitMQService.PushSeed(c.Request.Context(), seedOrtho)
+	if telemetry.LogAndError(c, err, "ingestor", "Error pushing seed ortho to queue") {
+		return
+	}
+
+	// Return 202 Accepted response (as per the diagram)
+	c.JSON(http.StatusAccepted, gin.H{
+		"status":  "success",
+		"message": "Corpus processing initiated",
+	})
+}
+
 func main() {
 	var cfg config.IngestorConfig
 	if err := envconfig.Process("INGESTOR", &cfg); err != nil {
@@ -141,11 +225,50 @@ func main() {
 	orthosService := clients.NewOrthosService(cfg.OrthosServiceURL, getOrthosClient, saveOrthosClient)
 	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, pushClient, popClient, ackClient)
 
+	// Create RabbitMQ clients for the different types
+	contextRabbitClient, err := httpclient.NewRabbitClient[types.ContextInput]("amqp://guest:guest@rabbitmq:5672/")
+	if err != nil {
+		log.Fatalf("Failed to create context RabbitMQ client: %v", err)
+	}
+	defer contextRabbitClient.Close(context.Background())
+
+	versionRabbitClient, err := httpclient.NewRabbitClient[types.VersionInfo]("amqp://guest:guest@rabbitmq:5672/")
+	if err != nil {
+		log.Fatalf("Failed to create version RabbitMQ client: %v", err)
+	}
+	defer versionRabbitClient.Close(context.Background())
+
+	pairsRabbitClient, err := httpclient.NewRabbitClient[types.Pair]("amqp://guest:guest@rabbitmq:5672/")
+	if err != nil {
+		log.Fatalf("Failed to create pairs RabbitMQ client: %v", err)
+	}
+	defer pairsRabbitClient.Close(context.Background())
+
+	seedRabbitClient, err := httpclient.NewRabbitClient[types.Ortho]("amqp://guest:guest@rabbitmq:5672/")
+	if err != nil {
+		log.Fatalf("Failed to create seed RabbitMQ client: %v", err)
+	}
+	defer seedRabbitClient.Close(context.Background())
+
+	// Create the RabbitMQ service
+	rabbitMQService := clients.NewRabbitMQService(
+		"amqp://guest:guest@rabbitmq:5672/",
+		contextRabbitClient,
+		versionRabbitClient,
+		pairsRabbitClient,
+		seedRabbitClient,
+	)
+
 	router.POST("/ingest", func(c *gin.Context) {
 		c.Set("config", cfg)
 		ctxWithConfig := context.WithValue(c.Request.Context(), configKey, cfg)
 		c.Request = c.Request.WithContext(ctxWithConfig)
 		ginHandleTextInput(c, contextService, remediationsService, orthosService, workServerService)
+	})
+
+	// Add the new corpora handler that uses RabbitMQ
+	router.POST("/corpora", func(c *gin.Context) {
+		handlePostCorpus(c, contextService, rabbitMQService)
 	})
 
 	healthCheck := health.New(health.Options{

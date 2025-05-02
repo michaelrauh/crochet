@@ -89,15 +89,32 @@ func (c *GenericClient[T]) GenericCall(ctx context.Context, method, url string, 
 }
 
 // RabbitClient provides a simple interface for pushing messages to RabbitMQ
-type RabbitClient struct {
+type RabbitClient[T any] struct {
 	conn     *amqp.Connection
 	channel  *amqp.Channel
 	confirms chan amqp.Confirmation
 	tracer   trace.Tracer
 }
 
+// MessageWithAck holds both the deserialized message data and its delivery tag for acknowledgment
+type MessageWithAck[T any] struct {
+	Data        T
+	DeliveryTag uint64
+	Channel     *amqp.Channel
+}
+
+// Ack acknowledges the message
+func (m *MessageWithAck[T]) Ack() error {
+	return m.Channel.Ack(m.DeliveryTag, false) // false = don't ack multiple messages
+}
+
+// Nack rejects the message and always requeues it
+func (m *MessageWithAck[T]) Nack() error {
+	return m.Channel.Nack(m.DeliveryTag, false, true) // true = always requeue
+}
+
 // NewRabbitClient creates a new RabbitMQ client
-func NewRabbitClient(url string) (*RabbitClient, error) {
+func NewRabbitClient[T any](url string) (*RabbitClient[T], error) {
 	// Initialize tracer
 	tracer := otel.Tracer("github.com/crochet/httpclient/rabbit")
 
@@ -136,7 +153,7 @@ func NewRabbitClient(url string) (*RabbitClient, error) {
 	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 	span.SetStatus(codes.Ok, "RabbitMQ client initialized successfully")
 
-	return &RabbitClient{
+	return &RabbitClient[T]{
 		conn:     conn,
 		channel:  ch,
 		confirms: confirms,
@@ -145,8 +162,7 @@ func NewRabbitClient(url string) (*RabbitClient, error) {
 }
 
 // DeclareQueue declares a queue to ensure it exists
-func (c *RabbitClient) DeclareQueue(queueName string) error {
-	ctx := context.Background()
+func (c *RabbitClient[T]) DeclareQueue(ctx context.Context, queueName string) error {
 	ctx, span := c.tracer.Start(ctx, "rabbitmq.declare_queue")
 	defer span.End()
 
@@ -171,7 +187,7 @@ func (c *RabbitClient) DeclareQueue(queueName string) error {
 }
 
 // PushMessage publishes a message to the specified queue and waits for server acknowledgement
-func (c *RabbitClient) PushMessage(ctx context.Context, queueName string, message []byte) error {
+func (c *RabbitClient[T]) PushMessage(ctx context.Context, queueName string, message []byte) error {
 	ctx, span := c.tracer.Start(ctx, "rabbitmq.publish_message")
 	defer span.End()
 
@@ -224,7 +240,7 @@ func (c *RabbitClient) PushMessage(ctx context.Context, queueName string, messag
 }
 
 // PushMessageBatch publishes multiple messages to the specified queue and waits for all acknowledgements
-func (c *RabbitClient) PushMessageBatch(ctx context.Context, queueName string, messages [][]byte) error {
+func (c *RabbitClient[T]) PushMessageBatch(ctx context.Context, queueName string, messages [][]byte) error {
 	ctx, span := c.tracer.Start(ctx, "rabbitmq.publish_batch")
 	defer span.End()
 
@@ -307,9 +323,159 @@ func (c *RabbitClient) PushMessageBatch(ctx context.Context, queueName string, m
 	return nil
 }
 
+// SetupConsumer prepares a channel for consuming messages with appropriate QoS settings
+func (c *RabbitClient[T]) SetupConsumer(ctx context.Context, queueName string, prefetchCount int) (<-chan amqp.Delivery, error) {
+	ctx, span := c.tracer.Start(ctx, "rabbitmq.setup_consumer")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("rabbitmq.queue", queueName),
+		attribute.Int("rabbitmq.prefetch_count", prefetchCount),
+	)
+
+	// Ensure the queue exists
+	_, err := c.channel.QueueDeclare(
+		queueName, // name
+		true,      // durable
+		false,     // delete when unused
+		false,     // exclusive
+		false,     // no-wait
+		nil,       // arguments
+	)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to declare queue")
+		return nil, fmt.Errorf("failed to declare queue: %w", err)
+	}
+
+	// Set QoS settings for batch consumption
+	if err := c.channel.Qos(
+		prefetchCount, // prefetch count
+		0,             // prefetch size
+		false,         // global
+	); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to set QoS")
+		return nil, fmt.Errorf("failed to set QoS: %w", err)
+	}
+
+	// Get messages from the queue
+	msgs, err := c.channel.Consume(
+		queueName, // queue
+		"",        // consumer
+		false,     // auto-ack
+		false,     // exclusive
+		false,     // no-local
+		false,     // no-wait
+		nil,       // args
+	)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to consume from queue")
+		return nil, fmt.Errorf("failed to consume from queue: %w", err)
+	}
+
+	span.SetStatus(codes.Ok, "Consumer setup successfully")
+	return msgs, nil
+}
+
+// PopMessages consumes a batch of messages from the queue with individual acknowledgment control
+func (c *RabbitClient[T]) PopMessages(ctx context.Context, msgs <-chan amqp.Delivery, batchSize int) ([]MessageWithAck[T], error) {
+	ctx, span := c.tracer.Start(ctx, "rabbitmq.pop_messages")
+	defer span.End()
+
+	span.SetAttributes(attribute.Int("rabbitmq.batch.size", batchSize))
+
+	result := make([]MessageWithAck[T], 0, batchSize)
+	timeout := time.After(10 * time.Second)
+
+	// Collect messages until we reach the batch size or timeout
+	for i := 0; i < batchSize; {
+		select {
+		case msg, ok := <-msgs:
+			if !ok {
+				// Channel closed
+				span.AddEvent("Channel closed prematurely")
+				return result, nil
+			}
+
+			// Create child span for message processing
+			_, msgSpan := c.tracer.Start(ctx, "rabbitmq.process_message")
+			msgSpan.SetAttributes(
+				attribute.Int("rabbitmq.message.index", i),
+				attribute.Int("rabbitmq.message.size", len(msg.Body)),
+				attribute.Int64("rabbitmq.delivery.tag", int64(msg.DeliveryTag)),
+			)
+
+			var data T
+			if err := json.Unmarshal(msg.Body, &data); err != nil {
+				msgSpan.RecordError(err)
+				msgSpan.SetStatus(codes.Error, "failed to unmarshal message")
+				msgSpan.End()
+
+				// Nack the message as it's malformed but still requeue it
+				_ = msg.Nack(false, true) // always requeue, even malformed messages
+				continue
+			}
+
+			result = append(result, MessageWithAck[T]{
+				Data:        data,
+				DeliveryTag: msg.DeliveryTag,
+				Channel:     c.channel,
+			})
+
+			msgSpan.SetStatus(codes.Ok, "Message processed")
+			msgSpan.End()
+			i++
+
+		case <-ctx.Done():
+			span.RecordError(ctx.Err())
+			span.SetStatus(codes.Error, "context canceled")
+			return result, ctx.Err()
+
+		case <-timeout:
+			// We've waited long enough, return what we have
+			span.AddEvent("Timeout waiting for more messages")
+			return result, nil
+		}
+	}
+
+	span.SetStatus(codes.Ok, fmt.Sprintf("Successfully popped %d messages", len(result)))
+	return result, nil
+}
+
+// PopMessagesFromQueue is a convenience method that sets up a consumer and pops messages
+func (c *RabbitClient[T]) PopMessagesFromQueue(ctx context.Context, queueName string, batchSize int) ([]MessageWithAck[T], error) {
+	ctx, span := c.tracer.Start(ctx, "rabbitmq.pop_messages_from_queue")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("rabbitmq.queue", queueName),
+		attribute.Int("rabbitmq.batch.size", batchSize),
+	)
+
+	// Setup consumer
+	msgs, err := c.SetupConsumer(ctx, queueName, batchSize)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to setup consumer")
+		return nil, fmt.Errorf("failed to setup consumer: %w", err)
+	}
+
+	// Pop messages
+	result, err := c.PopMessages(ctx, msgs, batchSize)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to pop messages")
+		return nil, fmt.Errorf("failed to pop messages: %w", err)
+	}
+
+	span.SetStatus(codes.Ok, fmt.Sprintf("Successfully popped %d messages from queue", len(result)))
+	return result, nil
+}
+
 // Close closes the connection and channel
-func (c *RabbitClient) Close() error {
-	ctx := context.Background()
+func (c *RabbitClient[T]) Close(ctx context.Context) error {
 	ctx, span := c.tracer.Start(ctx, "rabbitmq.close")
 	defer span.End()
 

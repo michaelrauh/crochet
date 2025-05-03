@@ -294,6 +294,7 @@ func main() {
 	// Create the RabbitMQ service
 	rabbitMQService := clients.NewRabbitMQService(
 		cfg.RabbitMQURL,
+		cfg.DBQueueName,
 		contextRabbitClient,
 		versionRabbitClient,
 		pairsRabbitClient,

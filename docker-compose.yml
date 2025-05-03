@@ -20,6 +20,8 @@ services:
         condition: service_started
       pyroscope:
         condition: service_started
+      rabbitmq:
+        condition: service_healthy
     networks:
       - app-network
     healthcheck:
@@ -40,6 +42,8 @@ services:
       - REPOSITORY_PYROSCOPE_ENDPOINT=http://pyroscope:4040
       - REPOSITORY_HOST=0.0.0.0
       - "REPOSITORY_CONTEXT_DB_ENDPOINT=:memory:"
+      - REPOSITORY_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - REPOSITORY_DB_QUEUE_NAME=db-queue
     logging:
       driver: "json-file"
       options:

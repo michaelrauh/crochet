@@ -39,6 +39,7 @@ type WorkServerServiceClient struct {
 
 type RabbitMQServiceClient struct {
 	URL           string
+	QueueName     string
 	ContextClient *httpclient.RabbitClient[types.ContextInput]
 	VersionClient *httpclient.RabbitClient[types.VersionInfo]
 	PairsClient   *httpclient.RabbitClient[types.Pair]
@@ -82,13 +83,14 @@ func NewWorkServerService(url string, pushClient *httpclient.GenericClient[types
 	}
 }
 
-func NewRabbitMQService(url string,
+func NewRabbitMQService(url string, queueName string,
 	contextClient *httpclient.RabbitClient[types.ContextInput],
 	versionClient *httpclient.RabbitClient[types.VersionInfo],
 	pairsClient *httpclient.RabbitClient[types.Pair],
 	seedClient *httpclient.RabbitClient[types.Ortho]) types.RabbitMQService {
 	return &RabbitMQServiceClient{
 		URL:           url,
+		QueueName:     queueName,
 		ContextClient: contextClient,
 		VersionClient: versionClient,
 		PairsClient:   pairsClient,
@@ -284,7 +286,7 @@ func (s *RabbitMQServiceClient) PushContext(ctx context.Context, contextInput ty
 		return fmt.Errorf("failed to marshal context input: %w", err)
 	}
 
-	if err := s.ContextClient.PushMessage(ctx, "context-queue", contextJSON); err != nil {
+	if err := s.ContextClient.PushMessage(ctx, s.QueueName, contextJSON); err != nil {
 		return fmt.Errorf("failed to push context to queue: %w", err)
 	}
 
@@ -297,7 +299,7 @@ func (s *RabbitMQServiceClient) PushVersion(ctx context.Context, version types.V
 		return fmt.Errorf("failed to marshal version info: %w", err)
 	}
 
-	if err := s.VersionClient.PushMessage(ctx, "version-queue", versionJSON); err != nil {
+	if err := s.VersionClient.PushMessage(ctx, s.QueueName, versionJSON); err != nil {
 		return fmt.Errorf("failed to push version to queue: %w", err)
 	}
 
@@ -316,7 +318,7 @@ func (s *RabbitMQServiceClient) PushPairs(ctx context.Context, pairs []types.Pai
 		}
 	}
 
-	if err := s.PairsClient.PushMessageBatch(ctx, "pairs-queue", messages); err != nil {
+	if err := s.PairsClient.PushMessageBatch(ctx, s.QueueName, messages); err != nil {
 		return fmt.Errorf("failed to push pairs to queue: %w", err)
 	}
 
@@ -329,7 +331,7 @@ func (s *RabbitMQServiceClient) PushSeed(ctx context.Context, seed types.Ortho) 
 		return fmt.Errorf("failed to marshal seed ortho: %w", err)
 	}
 
-	if err := s.SeedClient.PushMessage(ctx, "seed-queue", seedJSON); err != nil {
+	if err := s.SeedClient.PushMessage(ctx, s.QueueName, seedJSON); err != nil {
 		return fmt.Errorf("failed to push seed ortho to queue: %w", err)
 	}
 

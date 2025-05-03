@@ -22,7 +22,8 @@ RUN go mod tidy
 # Copy the repository source code
 WORKDIR /app
 COPY ./repository/go.mod ./repository/
-COPY ./repository/main.go ./repository/
+# Copy all Go files from the repository directory instead of just main.go
+COPY ./repository/*.go ./repository/
 
 # Set up the build environment
 WORKDIR /app/repository
@@ -60,10 +61,13 @@ RUN go get github.com/mitchellh/mapstructure
 
 # Add envconfig dependency
 RUN go get github.com/kelseyhightower/envconfig
+
+# Add Ristretto cache dependency for OrthosCache
+RUN go get github.com/dgraph-io/ristretto
 RUN go mod tidy
 
 # Build the application with the production build tag
-RUN CGO_ENABLED=0 GOOS=linux go build -tags=prod -v -o server ./main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -tags=prod -v -o server
 
 FROM alpine:3.19
 RUN apk --no-cache add ca-certificates

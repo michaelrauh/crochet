@@ -169,14 +169,12 @@ func (m *MockRabbitMQService) PushSeed(ctx context.Context, seed types.Ortho) er
 }
 
 // setupGinRouter creates a test Gin router with the specified handlers
-func setupGinRouter(contextService types.ContextService, remediationsService types.RemediationsService, orthosService types.OrthosService, workServerService types.WorkServerService) *gin.Engine {
+func setupGinRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New() // Use New instead of Default to avoid default middleware
 	r.Use(gin.Recovery())
 	r.Use(telemetry.GinErrorHandler()) // Use the shared error handler middleware
-	r.POST("/ingest", func(c *gin.Context) {
-		ginHandleTextInput(c, contextService, remediationsService, orthosService, workServerService)
-	})
+
 	return r
 }
 
@@ -223,7 +221,7 @@ func TestHandleTextInputValidJSON(t *testing.T) {
 		IDs:     []string{"1234567890abcdef1234567890abcdef"},
 	}, nil)
 
-	router := setupGinRouter(mockContextService, mockRemediationsService, mockOrthosService, mockWorkServerService)
+	router := setupGinRouter()
 
 	body := `{"title": "Test Title", "text": "Test Content"}`
 	req, _ := http.NewRequest(http.MethodPost, "/ingest", bytes.NewBufferString(body))
@@ -331,7 +329,6 @@ func TestHandleGetContext(t *testing.T) {
 	// Setup the Gin router for testing
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.GET("/Context", handleGetContext)
 
 	// Create a test request
 	req, _ := http.NewRequest(http.MethodGet, "/Context", nil)

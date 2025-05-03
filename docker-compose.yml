@@ -44,6 +44,7 @@ services:
       - "REPOSITORY_CONTEXT_DB_ENDPOINT=:memory:"
       - REPOSITORY_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - REPOSITORY_DB_QUEUE_NAME=db-queue
+      - REPOSITORY_WORK_QUEUE_NAME=work-queue
     logging:
       driver: "json-file"
       options:

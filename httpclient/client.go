@@ -483,6 +483,24 @@ func (c *RabbitClient[T]) PopMessagesFromQueue(ctx context.Context, queueName st
 	return result, nil
 }
 
+// AckByDeliveryTag acknowledges a message with the given delivery tag
+func (c *RabbitClient[T]) AckByDeliveryTag(ctx context.Context, deliveryTag uint64) error {
+	var span trace.Span
+	ctx, span = c.tracer.Start(ctx, "rabbitmq.ack_by_delivery_tag")
+	defer span.End()
+
+	span.SetAttributes(attribute.Int64("rabbitmq.delivery.tag", int64(deliveryTag)))
+
+	if err := c.channel.Ack(deliveryTag, false); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to acknowledge message")
+		return fmt.Errorf("failed to acknowledge message with tag %d: %w", deliveryTag, err)
+	}
+
+	span.SetStatus(codes.Ok, "Message acknowledged successfully")
+	return nil
+}
+
 // Close closes the connection and channel
 func (c *RabbitClient[T]) Close(ctx context.Context) error {
 	ctx, span := c.tracer.Start(ctx, "rabbitmq.close")

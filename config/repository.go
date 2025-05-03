@@ -11,6 +11,7 @@ type RepositoryConfig struct {
 	ContextDBEndpoint      string `envconfig:"CONTEXT_DB_ENDPOINT" required:"true"`                      // Added for direct DB access
 	RabbitMQURL            string `envconfig:"RABBITMQ_URL" default:"amqp://guest:guest@rabbitmq:5672/"` // Added for RabbitMQ configuration
 	DBQueueName            string `envconfig:"DB_QUEUE_NAME" default:"db-queue"`                         // Added for single DB queue configuration
+	WorkQueueName          string `envconfig:"WORK_QUEUE_NAME" default:"work-queue"`                     // Added for work queue configuration
 }
 
 // Validate checks the repository configuration for required values
@@ -41,6 +42,9 @@ func (c *RepositoryConfig) Validate() error {
 	}
 	if c.DBQueueName == "" {
 		return NewConfigError("DB_QUEUE_NAME is required")
+	}
+	if c.WorkQueueName == "" {
+		return NewConfigError("WORK_QUEUE_NAME is required")
 	}
 	return nil
 }

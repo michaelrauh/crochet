@@ -5,9 +5,9 @@ set -e
 echo "Using workspace mode with Go 1.24.2..."
 go work use
 
-# Run unit tests for the ingestor service
-echo "Running unit tests for ingestor service..."
-cd ingestor
+# Run unit tests for the repository service
+echo "Running unit tests for repository service..."
+cd repository
 go test -tags=test -v ./...
 cd ..
 
@@ -43,7 +43,7 @@ go mod tidy
 go test -v .
 cd ..
 
-# Run end-to-end test for the ingestor service
-echo "Running end-to-end tests for ingestor service..."
+# Run end-to-end test for the repository service
+echo "Running end-to-end tests for repository service..."
 bash test_e2e.sh
 echo "End-to-end tests completed successfully"

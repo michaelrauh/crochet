@@ -6,7 +6,7 @@ ITERATIONS=200
 # Longer, more complex text to generate more work for the services
 SAMPLE_TEXT="This is a much longer text sample that will require more processing. It includes various words and phrases that will generate different subphrases and require more CPU time to process. The goal is to create enough load to make profiling data more visible in Pyroscope dashboards. We want to ensure that block profiling and mutex profiling have enough events to record, since these are particularly important for diagnosing performance bottlenecks in Go services."
 
-echo "Starting load test - sending $ITERATIONS requests to the ingestor service..."
+echo "Starting load test - sending $ITERATIONS requests to the repository service..."
 
 for i in $(seq 1 $ITERATIONS); do
   # Add some randomness to the text to avoid any caching

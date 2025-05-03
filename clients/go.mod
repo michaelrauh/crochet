@@ -1,6 +1,6 @@
 module crochet/clients
 
-go 1.24.2
+go 1.24.0
 
 require (
 	crochet/httpclient v0.0.0-00010101000000-000000000000

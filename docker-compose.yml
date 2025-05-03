@@ -1,8 +1,8 @@
 services:
-  ingestor:
+  repository:
     build:
       context: .
-      dockerfile: ./ingestor/Dockerfile
+      dockerfile: ./repository/Dockerfile
     ports:
       - "8080:8080"
     depends_on:
@@ -29,16 +29,17 @@ services:
       retries: 5
       start_period: 30s
     environment:
-      - INGESTOR_SERVICE_NAME=ingestor
-      - INGESTOR_CONTEXT_SERVICE_URL=http://context:8081
-      - INGESTOR_PORT=8080
-      - INGESTOR_REMEDIATIONS_SERVICE_URL=http://remediations:8082
-      - INGESTOR_ORTHOS_SERVICE_URL=http://orthos:8083
-      - INGESTOR_WORK_SERVER_URL=http://workserver:8084
-      - INGESTOR_JAEGER_ENDPOINT=jaeger:4317
-      - INGESTOR_METRICS_ENDPOINT=otel-collector:4317
-      - INGESTOR_PYROSCOPE_ENDPOINT=http://pyroscope:4040
-      - INGESTOR_HOST=0.0.0.0
+      - REPOSITORY_SERVICE_NAME=repository
+      - REPOSITORY_CONTEXT_SERVICE_URL=http://context:8081
+      - REPOSITORY_PORT=8080
+      - REPOSITORY_REMEDIATIONS_SERVICE_URL=http://remediations:8082
+      - REPOSITORY_ORTHOS_SERVICE_URL=http://orthos:8083
+      - REPOSITORY_WORK_SERVER_URL=http://workserver:8084
+      - REPOSITORY_JAEGER_ENDPOINT=jaeger:4317
+      - REPOSITORY_METRICS_ENDPOINT=otel-collector:4317
+      - REPOSITORY_PYROSCOPE_ENDPOINT=http://pyroscope:4040
+      - REPOSITORY_HOST=0.0.0.0
+      - "REPOSITORY_CONTEXT_DB_ENDPOINT=:memory:"
     logging:
       driver: "json-file"
       options:

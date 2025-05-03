@@ -6,7 +6,6 @@ docker compose up --build -d
 
 # Simple delay to allow services to start
 echo "Waiting for services to start..."
-
 echo "Services should be ready. Running tests..."
 
 # Test 1: Submit first message
@@ -22,14 +21,12 @@ echo "Response from first request: $response1"
 #     docker compose down --remove-orphans
 #     exit 1
 # fi
-
 # if ! echo "$response1" | grep -q '"version":1'; then
 #     echo "ERROR: Version mismatch in first call. Expected version 1."
 #     docker compose logs
 #     docker compose down --remove-orphans
 #     exit 1
 # fi
-
 # echo "First message successfully ingested."
 
 # # Test 2: Submit second message
@@ -45,14 +42,12 @@ echo "Response from first request: $response1"
 #     docker compose down --remove-orphans
 #     exit 1
 # fi
-
 # if ! echo "$response2" | grep -q '"version":2'; then
 #     echo "ERROR: Version mismatch in second call. Expected version 2."
 #     docker compose logs
 #     docker compose down --remove-orphans
 #     exit 1
 # fi
-
 # echo "Second message successfully ingested."
 
 # # Clean up

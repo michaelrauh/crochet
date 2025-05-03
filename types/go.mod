@@ -1,6 +1,6 @@
 module crochet/types
 
-go 1.24.2
+go 1.24.0
 
 require (
 	github.com/gin-gonic/gin v1.10.0
@@ -46,4 +46,5 @@ require (
 )
 
 replace crochet/httpclient => ../httpclient
+
 replace crochet/telemetry => ../telemetry

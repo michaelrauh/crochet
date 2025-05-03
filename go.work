@@ -7,10 +7,10 @@ use (
 	./context
 	./health
 	./httpclient
-	./ingestor
 	./middleware
 	./orthos
 	./remediations
+	./repository
 	./search
 	./telemetry
 	./text

@@ -16,6 +16,8 @@ type ContextStore interface {
 	SaveSubphrases(subphrases [][]string) [][]string
 	GetVocabulary() []string
 	GetSubphrases() [][]string
+	GetVersion() (int, error) // Modified to return error
+	SetVersion(version int) error
 	Close() error
 }
 
@@ -108,6 +110,25 @@ func (ls *LibSQLContextStore) initSchema() error {
 	`)
 	if err != nil {
 		return fmt.Errorf("error creating subphrases table: %w", err)
+	}
+
+	// Create version table
+	_, err = ls.db.Exec(`
+		CREATE TABLE IF NOT EXISTS version (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			version INTEGER NOT NULL
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("error creating version table: %w", err)
+	}
+
+	// Initialize version if not exists
+	_, err = ls.db.Exec(`
+		INSERT OR IGNORE INTO version (id, version) VALUES (1, 1)
+	`)
+	if err != nil {
+		return fmt.Errorf("error initializing version: %w", err)
 	}
 
 	return nil
@@ -286,6 +307,25 @@ func (ls *LibSQLContextStore) GetSubphrases() [][]string {
 	}
 
 	return subphrases
+}
+
+// GetVersion retrieves the current version from the database
+func (ls *LibSQLContextStore) GetVersion() (int, error) {
+	var version int
+	err := ls.db.QueryRow("SELECT version FROM version WHERE id = 1").Scan(&version)
+	if err != nil {
+		return 0, fmt.Errorf("error reading version: %w", err)
+	}
+	return version, nil
+}
+
+// SetVersion updates the version in the database
+func (ls *LibSQLContextStore) SetVersion(version int) error {
+	_, err := ls.db.Exec("UPDATE version SET version = ? WHERE id = 1", version)
+	if err != nil {
+		return fmt.Errorf("error updating version: %w", err)
+	}
+	return nil
 }
 
 // Close closes the database connection

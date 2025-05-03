@@ -7,6 +7,7 @@ type IngestorConfig struct {
 	RemediationsServiceURL string `envconfig:"REMEDIATIONS_SERVICE_URL" required:"true"`
 	OrthosServiceURL       string `envconfig:"ORTHOS_SERVICE_URL" required:"true"`
 	WorkServerURL          string `envconfig:"WORK_SERVER_URL" required:"true"`
+	ContextDBEndpoint      string `envconfig:"CONTEXT_DB_ENDPOINT" required:"true"` // Added for direct DB access
 }
 
 // Validate checks the ingestor configuration for required values
@@ -28,6 +29,9 @@ func (c *IngestorConfig) Validate() error {
 	}
 	if c.WorkServerURL == "" {
 		return NewConfigError("WORK_SERVER_URL is required")
+	}
+	if c.ContextDBEndpoint == "" {
+		return NewConfigError("CONTEXT_DB_ENDPOINT is required")
 	}
 	return nil
 }

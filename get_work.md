@@ -8,5 +8,5 @@ sequenceDiagram
     Worker->>Repository: GET /Work
     Repository->>DB: Read(Version)
     Repository->>Work Queue: Pop
-    Repository->>Worker: Reply (200, Version, Work) 
-```
+    Repository->>Worker: Reply (200, Version, Work)  
+``` 

@@ -20,9 +20,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kelseyhightower/envconfig"
+	"go.opentelemetry.io/otel"
 )
 
 var ingestMutex sync.Mutex
+var ctxStore types.ContextStore // Add a ContextStore for direct DB access
 
 type contextKey string
 
@@ -183,6 +185,51 @@ func handlePostCorpus(c *gin.Context, contextService types.ContextService, rabbi
 	})
 }
 
+// initStore initializes the context store for direct DB access
+func initStore(cfg config.IngestorConfig) error {
+	var err error
+	connURL := cfg.ContextDBEndpoint
+	ctxStore, err = types.NewLibSQLContextStore(connURL)
+	if err != nil {
+		return fmt.Errorf("failed to initialize context store: %w", err)
+	}
+	return nil
+}
+
+// handleGetContext implements the flow from get_context.md
+// The ingestor acts as the repository in this case, fetching context data directly from the DB
+func handleGetContext(c *gin.Context) {
+	// Create a span using OpenTelemetry
+	tracer := otel.Tracer("crochet/ingestor")
+	ctx, span := tracer.Start(c.Request.Context(), "ingestor.handleGetContext")
+	defer span.End()
+
+	// Read context data directly from DB
+	vocabularySlice := ctxStore.GetVocabulary()
+	linesSlice := ctxStore.GetSubphrases()
+
+	// Get the version from the database using the new GetVersion method
+	version, err := ctxStore.GetVersion()
+	if err != nil {
+		telemetry.LogAndError(c, err, "ingestor", "Error getting context version")
+		return
+	}
+
+	// Construct response with the proper version from the DB
+	response := gin.H{
+		"version":    version,
+		"vocabulary": vocabularySlice,
+		"lines":      linesSlice,
+	}
+
+	// Log the operation with the created context for tracing
+	log.Printf("[%s] Retrieved context data: %d vocabulary items, %d lines",
+		ctx.Value("request_id"), len(vocabularySlice), len(linesSlice))
+
+	// Return the context data with a 200 OK response as per the diagram
+	c.JSON(http.StatusOK, response)
+}
+
 func main() {
 	var cfg config.IngestorConfig
 	if err := envconfig.Process("INGESTOR", &cfg); err != nil {
@@ -259,6 +306,16 @@ func main() {
 		seedRabbitClient,
 	)
 
+	// Initialize the store for direct DB access
+	if err := initStore(cfg); err != nil {
+		log.Fatalf("Failed to initialize context store: %v", err)
+	}
+	defer func() {
+		if err := ctxStore.Close(); err != nil {
+			log.Printf("Error closing context store: %v", err)
+		}
+	}()
+
 	router.POST("/ingest", func(c *gin.Context) {
 		c.Set("config", cfg)
 		ctxWithConfig := context.WithValue(c.Request.Context(), configKey, cfg)
@@ -270,6 +327,10 @@ func main() {
 	router.POST("/corpora", func(c *gin.Context) {
 		handlePostCorpus(c, contextService, rabbitMQService)
 	})
+
+	// Add the GET /Context endpoint as per get_context.md diagram
+	// This implementation reads directly from the database
+	router.GET("/Context", handleGetContext)
 
 	healthCheck := health.New(health.Options{
 		ServiceName: cfg.ServiceName,

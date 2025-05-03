@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -18,7 +19,9 @@ import (
 	"crochet/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"golang.org/x/exp/slices"
 )
 
 func init() {
@@ -705,4 +708,187 @@ func TestPostCorpus(t *testing.T) {
 	if capturedSeed.ID == "" {
 		t.Errorf("Expected seed ortho to have non-empty ID")
 	}
+}
+
+// TestHandleGetContext tests the GET /Context endpoint that implements the flow from get_context.md
+// In this test, the ingestor acts as the repository and retrieves context data directly from the database
+func TestHandleGetContext(t *testing.T) {
+	// Set up a mock context store
+	mockStore := &MockContextStore{
+		vocabulary: []string{"test", "vocabulary", "words"},
+		subphrases: [][]string{
+			{"test", "phrase"},
+			{"another", "line"},
+		},
+	}
+
+	// Replace the global ctxStore with our mock
+	originalStore := ctxStore
+	ctxStore = mockStore
+	defer func() { ctxStore = originalStore }()
+
+	// Setup the Gin router for testing
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/Context", handleGetContext)
+
+	// Create a test request
+	req, _ := http.NewRequest(http.MethodGet, "/Context", nil)
+	w := httptest.NewRecorder()
+
+	// Perform the request
+	router.ServeHTTP(w, req)
+
+	// Check the response status code (should be 200 OK as per the diagram)
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
+	}
+
+	// Parse the response
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Errorf("Failed to decode response: %v", err)
+	}
+
+	// Verify the version
+	assert.Contains(t, response, "version")
+
+	// Verify the vocabulary matches what we set in the mock
+	vocabulary, ok := response["vocabulary"].([]interface{})
+	assert.True(t, ok)
+	assert.Len(t, vocabulary, 3)
+	assert.Contains(t, vocabulary, "test")
+	assert.Contains(t, vocabulary, "vocabulary")
+	assert.Contains(t, vocabulary, "words")
+
+	// Verify the lines match what we set in the mock
+	lines, ok := response["lines"].([]interface{})
+	assert.True(t, ok)
+	assert.Len(t, lines, 2)
+
+	// Verify the first line
+	firstLine, ok := lines[0].([]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, "test", firstLine[0])
+	assert.Equal(t, "phrase", firstLine[1])
+
+	// Verify the second line
+	secondLine, ok := lines[1].([]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, "another", secondLine[0])
+	assert.Equal(t, "line", secondLine[1])
+}
+
+// MockContextStore implements the types.ContextStore interface for testing
+type MockContextStore struct {
+	vocabulary []string
+	subphrases [][]string
+	version    int
+}
+
+func (m *MockContextStore) SaveVocabulary(words []string) []string {
+	newWords := make([]string, 0)
+	for _, word := range words {
+		if !slices.Contains(m.vocabulary, word) {
+			m.vocabulary = append(m.vocabulary, word)
+			newWords = append(newWords, word)
+		}
+	}
+	return newWords
+}
+
+func (m *MockContextStore) SaveSubphrases(phrases [][]string) [][]string {
+	newPhrases := make([][]string, 0)
+	for _, phrase := range phrases {
+		found := false
+		for _, existing := range m.subphrases {
+			if reflect.DeepEqual(existing, phrase) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			m.subphrases = append(m.subphrases, phrase)
+			newPhrases = append(newPhrases, phrase)
+		}
+	}
+	return newPhrases
+}
+
+func (m *MockContextStore) GetVocabulary() []string {
+	return m.vocabulary
+}
+
+func (m *MockContextStore) GetSubphrases() [][]string {
+	return m.subphrases
+}
+
+// GetVersion retrieves the current version from the mock store
+func (m *MockContextStore) GetVersion() (int, error) {
+	if m.version == 0 {
+		// Default version is 1
+		return 1, nil
+	}
+	return m.version, nil
+}
+
+// SetVersion updates the version in the mock store
+func (m *MockContextStore) SetVersion(version int) error {
+	m.version = version
+	return nil
+}
+
+func (m *MockContextStore) Close() error {
+	return nil
+}
+
+// TestHandleGetContextError tests error handling in the GET /Context endpoint
+func TestHandleGetContextError(t *testing.T) {
+	// Create a mock store that returns empty data
+	mockStore := &MockContextStore{
+		vocabulary: []string{},
+		subphrases: [][]string{},
+	}
+
+	// Replace the global ctxStore with our mock
+	originalStore := ctxStore
+	ctxStore = mockStore
+	defer func() { ctxStore = originalStore }()
+
+	// Setup the Gin router with error handling middleware
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(telemetry.GinErrorHandler())
+	router.GET("/Context", handleGetContext)
+
+	// Create a test request
+	req, _ := http.NewRequest(http.MethodGet, "/Context", nil)
+	w := httptest.NewRecorder()
+
+	// Perform the request
+	router.ServeHTTP(w, req)
+
+	// Should return success status
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Parse the response
+	var response map[string]interface{}
+	err := json.NewDecoder(w.Body).Decode(&response)
+	assert.Nil(t, err)
+
+	// Verify that the response has the expected empty fields
+	assert.Contains(t, response, "vocabulary")
+	assert.Contains(t, response, "lines")
+	assert.Contains(t, response, "version")
+
+	// Vocabulary should be empty
+	vocabulary, ok := response["vocabulary"].([]interface{})
+	assert.True(t, ok)
+	assert.Len(t, vocabulary, 0)
+
+	// Lines should be empty
+	lines, ok := response["lines"].([]interface{})
+	assert.True(t, ok)
+	assert.Len(t, lines, 0)
 }

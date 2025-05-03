@@ -8,7 +8,8 @@ type RepositoryConfig struct {
 	RemediationsServiceURL string `envconfig:"REMEDIATIONS_SERVICE_URL" required:"true"`
 	OrthosServiceURL       string `envconfig:"ORTHOS_SERVICE_URL" required:"true"`
 	WorkServerURL          string `envconfig:"WORK_SERVER_URL" required:"true"`
-	ContextDBEndpoint      string `envconfig:"CONTEXT_DB_ENDPOINT" required:"true"` // Added for direct DB access
+	ContextDBEndpoint      string `envconfig:"CONTEXT_DB_ENDPOINT" required:"true"`                      // Added for direct DB access
+	RabbitMQURL            string `envconfig:"RABBITMQ_URL" default:"amqp://guest:guest@rabbitmq:5672/"` // Added for RabbitMQ configuration
 }
 
 // Validate checks the repository configuration for required values
@@ -33,6 +34,9 @@ func (c *RepositoryConfig) Validate() error {
 	}
 	if c.ContextDBEndpoint == "" {
 		return NewConfigError("CONTEXT_DB_ENDPOINT is required")
+	}
+	if c.RabbitMQURL == "" {
+		return NewConfigError("RABBITMQ_URL is required")
 	}
 	return nil
 }

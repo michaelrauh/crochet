@@ -267,25 +267,25 @@ func main() {
 	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, pushClient, popClient, ackClient)
 
 	// Create RabbitMQ clients for the different types
-	contextRabbitClient, err := httpclient.NewRabbitClient[types.ContextInput]("amqp://guest:guest@rabbitmq:5672/")
+	contextRabbitClient, err := httpclient.NewRabbitClient[types.ContextInput](cfg.RabbitMQURL)
 	if err != nil {
 		log.Fatalf("Failed to create context RabbitMQ client: %v", err)
 	}
 	defer contextRabbitClient.Close(context.Background())
 
-	versionRabbitClient, err := httpclient.NewRabbitClient[types.VersionInfo]("amqp://guest:guest@rabbitmq:5672/")
+	versionRabbitClient, err := httpclient.NewRabbitClient[types.VersionInfo](cfg.RabbitMQURL)
 	if err != nil {
 		log.Fatalf("Failed to create version RabbitMQ client: %v", err)
 	}
 	defer versionRabbitClient.Close(context.Background())
 
-	pairsRabbitClient, err := httpclient.NewRabbitClient[types.Pair]("amqp://guest:guest@rabbitmq:5672/")
+	pairsRabbitClient, err := httpclient.NewRabbitClient[types.Pair](cfg.RabbitMQURL)
 	if err != nil {
 		log.Fatalf("Failed to create pairs RabbitMQ client: %v", err)
 	}
 	defer pairsRabbitClient.Close(context.Background())
 
-	seedRabbitClient, err := httpclient.NewRabbitClient[types.Ortho]("amqp://guest:guest@rabbitmq:5672/")
+	seedRabbitClient, err := httpclient.NewRabbitClient[types.Ortho](cfg.RabbitMQURL)
 	if err != nil {
 		log.Fatalf("Failed to create seed RabbitMQ client: %v", err)
 	}
@@ -293,7 +293,7 @@ func main() {
 
 	// Create the RabbitMQ service
 	rabbitMQService := clients.NewRabbitMQService(
-		"amqp://guest:guest@rabbitmq:5672/",
+		cfg.RabbitMQURL,
 		contextRabbitClient,
 		versionRabbitClient,
 		pairsRabbitClient,

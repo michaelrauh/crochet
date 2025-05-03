@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"crochet/config"
-	"crochet/httpclient"
 	"crochet/telemetry"
 	"crochet/text"
 	"crochet/types"
@@ -21,10 +20,13 @@ import (
 
 // RepositoryHandler encapsulates the dependencies needed for repository endpoints
 type RepositoryHandler struct {
-	Store           types.ContextStore
-	OrthosCache     OrthosCache
-	RabbitMQService types.RabbitMQService
-	Config          config.RepositoryConfig
+	Store              types.ContextStore
+	OrthosCache        OrthosCache
+	RabbitMQService    types.RabbitMQService // For pushing context, version, pairs, and seed to DB queue
+	WorkQueueClient    WorkQueueClient       // For popping work and acknowledging receipts
+	OrthosClient       DBQueueClient         // For pushing new orthos to DB queue
+	RemediationsClient DBQueueClient         // For pushing remediations to DB queue
+	Config             config.RepositoryConfig
 }
 
 // NewRepositoryHandler creates a new repository handler with the given dependencies
@@ -32,13 +34,19 @@ func NewRepositoryHandler(
 	store types.ContextStore,
 	orthosCache OrthosCache,
 	rabbitMQService types.RabbitMQService,
+	workQueueClient WorkQueueClient,
+	orthosClient DBQueueClient,
+	remediationsClient DBQueueClient,
 	cfg config.RepositoryConfig,
 ) *RepositoryHandler {
 	return &RepositoryHandler{
-		Store:           store,
-		OrthosCache:     orthosCache,
-		RabbitMQService: rabbitMQService,
-		Config:          cfg,
+		Store:              store,
+		OrthosCache:        orthosCache,
+		RabbitMQService:    rabbitMQService,
+		WorkQueueClient:    workQueueClient,
+		OrthosClient:       orthosClient,
+		RemediationsClient: remediationsClient,
+		Config:             cfg,
 	}
 }
 
@@ -122,49 +130,37 @@ func (h *RepositoryHandler) HandlePostResults(c *gin.Context) {
 		return
 	}
 
+	// Filter new orthos using the cache
 	newOrthos := h.OrthosCache.FilterNewOrthos(request.Orthos)
 	log.Printf("[%s] Received %d orthos, %d are new", ctx.Value("request_id"), len(request.Orthos), len(newOrthos))
 
-	orthosClient, err := httpclient.NewRabbitClient[types.Ortho](h.Config.RabbitMQURL)
-	if err != nil {
-		telemetry.LogAndError(c, err, "repository", "Failed to create orthos RabbitMQ client")
-		return
-	}
-	defer orthosClient.Close(ctx)
-
-	remediationsClient, err := httpclient.NewRabbitClient[types.RemediationTuple](h.Config.RabbitMQURL)
-	if err != nil {
-		telemetry.LogAndError(c, err, "repository", "Failed to create remediations RabbitMQ client")
-		return
-	}
-	defer remediationsClient.Close(ctx)
-
+	// Push new orthos to DB queue
 	for _, ortho := range newOrthos {
 		orthoJSON, err := json.Marshal(ortho)
 		if err != nil {
 			telemetry.LogAndError(c, err, "repository", "Failed to marshal ortho")
 			continue
 		}
-
-		if err := orthosClient.PushMessage(ctx, h.Config.DBQueueName, orthoJSON); err != nil {
+		if err := h.OrthosClient.PushMessage(ctx, h.Config.DBQueueName, orthoJSON); err != nil {
 			telemetry.LogAndError(c, err, "repository", "Failed to push ortho to DB queue")
 			continue
 		}
 	}
 
+	// Push remediations to DB queue
 	for _, remediation := range request.Remediations {
 		remediationJSON, err := json.Marshal(remediation)
 		if err != nil {
 			telemetry.LogAndError(c, err, "repository", "Failed to marshal remediation")
 			continue
 		}
-
-		if err := remediationsClient.PushMessage(ctx, h.Config.DBQueueName, remediationJSON); err != nil {
+		if err := h.RemediationsClient.PushMessage(ctx, h.Config.DBQueueName, remediationJSON); err != nil {
 			telemetry.LogAndError(c, err, "repository", "Failed to push remediation to DB queue")
 			continue
 		}
 	}
 
+	// Parse receipt tag and acknowledge it on the work queue
 	receiptTag, err := strconv.ParseUint(request.Receipt, 10, 64)
 	if err != nil {
 		telemetry.LogAndError(c, err, "repository", "Invalid receipt format")
@@ -175,18 +171,8 @@ func (h *RepositoryHandler) HandlePostResults(c *gin.Context) {
 		return
 	}
 
-	workClient, err := httpclient.NewRabbitClient[types.WorkItem](h.Config.RabbitMQURL)
-	if err != nil {
-		telemetry.LogAndError(c, err, "repository", "Failed to create work queue client")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "Failed to create work queue client",
-		})
-		return
-	}
-	defer workClient.Close(ctx)
-
-	if err := workClient.AckByDeliveryTag(ctx, receiptTag); err != nil {
+	// Acknowledge the receipt on the work queue
+	if err := h.WorkQueueClient.AckByDeliveryTag(ctx, receiptTag); err != nil {
 		telemetry.LogAndError(c, err, "repository", "Failed to acknowledge work receipt")
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
@@ -203,7 +189,6 @@ func (h *RepositoryHandler) HandlePostResults(c *gin.Context) {
 		NewOrthosCount:    len(newOrthos),
 		RemediationsCount: len(request.Remediations),
 	}
-
 	c.JSON(http.StatusOK, response)
 }
 
@@ -246,14 +231,8 @@ func (h *RepositoryHandler) HandleGetWork(c *gin.Context) {
 		return
 	}
 
-	workClient, err := httpclient.NewRabbitClient[types.WorkItem](h.Config.RabbitMQURL)
-	if err != nil {
-		telemetry.LogAndError(c, err, "repository", "Failed to create RabbitMQ client for work queue")
-		return
-	}
-	defer workClient.Close(ctx)
-
-	messages, err := workClient.PopMessagesFromQueue(ctx, h.Config.WorkQueueName, 1)
+	// Get work items from work queue
+	messages, err := h.WorkQueueClient.PopMessagesFromQueue(ctx, h.Config.WorkQueueName, 1)
 	if err != nil {
 		telemetry.LogAndError(c, err, "repository", "Error popping message from work queue")
 		return
@@ -268,7 +247,11 @@ func (h *RepositoryHandler) HandleGetWork(c *gin.Context) {
 	}
 
 	message := messages[0]
-	workItem := message.Data
+	workItem, ok := message.Data.(types.WorkItem)
+	if !ok {
+		telemetry.LogAndError(c, fmt.Errorf("invalid message data type"), "repository", "Expected WorkItem but got something else")
+		return
+	}
 
 	receipt := fmt.Sprintf("%d", message.DeliveryTag)
 

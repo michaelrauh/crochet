@@ -55,11 +55,36 @@ func main() {
 	log.Printf("HTTP client options: DialTimeout=%v, DialKeepAlive=%v, MaxIdleConns=%d, ClientTimeout=%v",
 		cfg.DialTimeout, cfg.DialKeepAlive, cfg.MaxIdleConns, cfg.ClientTimeout)
 
-	rabbitClients, err := clients.NewRabbitMQClients(cfg.RabbitMQURL, cfg.DBQueueName)
+	// Initialize RabbitMQ clients for the DB Queue
+	// Used for storing context, version, pairs, seed, orthos, and remediations
+	log.Printf("Initializing DB queue clients for queue: %s", cfg.DBQueueName)
+	dbQueueClients, err := clients.NewRabbitMQClients(cfg.RabbitMQURL, cfg.DBQueueName)
 	if err != nil {
-		log.Fatalf("Failed to initialize RabbitMQ clients: %v", err)
+		log.Fatalf("Failed to initialize DB queue RabbitMQ clients: %v", err)
 	}
-	defer rabbitClients.CloseAll(context.Background())
+	defer dbQueueClients.CloseAll(context.Background())
+
+	// Initialize RabbitMQ client for the Work Queue
+	// Used for managing work items (pop and ack)
+	log.Printf("Initializing Work queue client for queue: %s", cfg.WorkQueueName)
+	workQueueClient, err := NewRabbitWorkQueueClient(cfg.RabbitMQURL)
+	if err != nil {
+		log.Fatalf("Failed to initialize Work queue RabbitMQ client: %v", err)
+	}
+	defer workQueueClient.Close(context.Background())
+
+	// Initialize clients for pushing orthos and remediations to DB queue
+	orthosClient, err := NewRabbitDBQueueClient[types.Ortho](cfg.RabbitMQURL)
+	if err != nil {
+		log.Fatalf("Failed to initialize Orthos client: %v", err)
+	}
+	defer orthosClient.Close(context.Background())
+
+	remediationsClient, err := NewRabbitDBQueueClient[types.RemediationTuple](cfg.RabbitMQURL)
+	if err != nil {
+		log.Fatalf("Failed to initialize Remediations client: %v", err)
+	}
+	defer remediationsClient.Close(context.Background())
 
 	if err := initStore(cfg); err != nil {
 		log.Fatalf("Failed to initialize context store: %v", err)
@@ -70,10 +95,14 @@ func main() {
 		}
 	}()
 
+	// Create repository handler with all necessary client components
 	handler := NewRepositoryHandler(
 		ctxStore,
 		orthosCache,
-		rabbitClients.Service,
+		dbQueueClients.Service, // For pushing context, version, pairs, and seed
+		workQueueClient,        // For popping work and acknowledging receipts
+		orthosClient,           // For pushing new orthos to DB queue
+		remediationsClient,     // For pushing remediations to DB queue
 		cfg,
 	)
 

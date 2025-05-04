@@ -5,6 +5,7 @@ use (
 	./clients
 	./config
 	./context
+	./feeder
 	./health
 	./httpclient
 	./middleware

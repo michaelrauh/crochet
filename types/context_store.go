@@ -112,6 +112,33 @@ func (ls *LibSQLContextStore) initSchema() error {
 		return fmt.Errorf("error creating subphrases table: %w", err)
 	}
 
+	// Create orthos table
+	_, err = ls.db.Exec(`
+		CREATE TABLE IF NOT EXISTS orthos (
+			id TEXT PRIMARY KEY,
+			grid TEXT NOT NULL,
+			shape TEXT NOT NULL,
+			position TEXT NOT NULL,
+			shell INTEGER NOT NULL
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("error creating orthos table: %w", err)
+	}
+
+	// Create remediations table
+	_, err = ls.db.Exec(`
+		CREATE TABLE IF NOT EXISTS remediations (
+			id TEXT PRIMARY KEY,
+			ortho_id TEXT NOT NULL,
+			pair_key TEXT NOT NULL,
+			FOREIGN KEY (ortho_id) REFERENCES orthos(id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("error creating remediations table: %w", err)
+	}
+
 	// Create version table
 	_, err = ls.db.Exec(`
 		CREATE TABLE IF NOT EXISTS version (
@@ -132,6 +159,11 @@ func (ls *LibSQLContextStore) initSchema() error {
 	}
 
 	return nil
+}
+
+// DB returns the underlying database connection
+func (ls *LibSQLContextStore) DB() *sql.DB {
+	return ls.db
 }
 
 // SaveVocabulary adds new vocabulary to the store and returns newly added items

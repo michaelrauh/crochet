@@ -1,6 +1,9 @@
 FROM golang:1.24.0 AS builder
 WORKDIR /app
 
+# Install SQLite and build dependencies
+RUN apt-get update && apt-get install -y sqlite3 libsqlite3-dev
+
 # Copy all shared modules
 COPY ./telemetry ./telemetry
 COPY ./text ./text
@@ -64,13 +67,25 @@ RUN go get github.com/kelseyhightower/envconfig
 
 # Add Ristretto cache dependency for OrthosCache
 RUN go get github.com/dgraph-io/ristretto
+
+# Add SQLite dependency
+RUN go get github.com/mattn/go-sqlite3
 RUN go mod tidy
 
-# Build the application with the production build tag
-RUN CGO_ENABLED=0 GOOS=linux go build -tags=prod -v -o server
+# Build the application with the production build tag and CGO enabled
+RUN CGO_ENABLED=1 GOOS=linux go build -tags=prod -v -o server
 
+# Use a more complete Alpine image to include necessary libraries for SQLite
 FROM alpine:3.19
-RUN apk --no-cache add ca-certificates
+
+# Install runtime dependencies for SQLite and other libraries
+RUN apk --no-cache add \
+    ca-certificates \
+    sqlite \
+    sqlite-libs \
+    libc6-compat \
+    gcompat
+
 WORKDIR /root/
 COPY --from=builder /app/repository/server .
 EXPOSE 8080

@@ -235,6 +235,47 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  feeder:
+    build:
+      context: .
+      dockerfile: ./feeder/Dockerfile
+    networks:
+      - app-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      workserver:
+        condition: service_healthy
+      orthos:
+        condition: service_healthy
+      remediations:
+        condition: service_healthy
+      context:
+        condition: service_healthy
+      repository:
+        condition: service_healthy
+    restart: always
+    environment:
+      - FEEDER_SERVICE_NAME=feeder
+      - FEEDER_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - FEEDER_DB_QUEUE_NAME=db-queue
+      - FEEDER_WORK_QUEUE_NAME=work-queue
+      - FEEDER_BATCH_SIZE=10
+      - FEEDER_PROCESSING_TIMEOUT=30s
+      - FEEDER_CONTEXT_SERVICE_URL=http://context:8081
+      - FEEDER_REMEDIATIONS_SERVICE_URL=http://remediations:8082
+      - FEEDER_ORTHOS_SERVICE_URL=http://orthos:8083
+      - FEEDER_WORK_SERVER_URL=http://workserver:8084
+      - FEEDER_JAEGER_ENDPOINT=jaeger:4317
+      - FEEDER_METRICS_ENDPOINT=otel-collector:4317
+      - FEEDER_PYROSCOPE_ENDPOINT=http://pyroscope:4040
+      - "FEEDER_CONTEXT_DB_ENDPOINT=:memory:"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
   
   rabbitmq:
     image: rabbitmq:3-management

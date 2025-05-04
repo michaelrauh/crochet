@@ -6,11 +6,24 @@ type ContextService interface {
 	SendMessage(ctx context.Context, input ContextInput) (ContextResponse, error)
 	GetVersion(ctx context.Context) (VersionResponse, error)
 	GetContext(ctx context.Context) (ContextDataResponse, error)
+	UpdateVersion(ctx context.Context, request VersionUpdateRequest) (VersionUpdateResponse, error)
 }
 
 // VersionResponse represents the response from the context service's version endpoint
 type VersionResponse struct {
 	Version int `json:"version"`
+}
+
+// VersionUpdateRequest represents a request to update the version in the database
+type VersionUpdateRequest struct {
+	Version int `json:"version"`
+}
+
+// VersionUpdateResponse represents the response after updating the version in the database
+type VersionUpdateResponse struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	Version int    `json:"version"`
 }
 
 // ContextDataResponse represents the response from the context service's get context endpoint

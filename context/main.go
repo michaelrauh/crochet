@@ -71,6 +71,32 @@ func ginGetContext(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+func ginUpdateVersion(c *gin.Context) {
+	var updateRequest types.VersionUpdateRequest
+	if err := c.ShouldBindJSON(&updateRequest); err != nil {
+		telemetry.LogAndError(c, err, "context", "Invalid JSON format for version update")
+		return
+	}
+
+	// Update the version in the database
+	if err := ctxStore.SetVersion(updateRequest.Version); err != nil {
+		telemetry.LogAndError(c, err, "context", "Failed to update version in database")
+		return
+	}
+
+	// Update the in-memory counter to match
+	versionCounter = updateRequest.Version
+
+	response := types.VersionUpdateResponse{
+		Status:  "success",
+		Message: fmt.Sprintf("Version updated successfully to %d", updateRequest.Version),
+		Version: updateRequest.Version,
+	}
+
+	log.Printf("Version updated to %d", updateRequest.Version)
+	c.JSON(http.StatusOK, response)
+}
+
 func main() {
 	config := config.GetContext()
 
@@ -102,6 +128,7 @@ func main() {
 	router.POST("/input", ginHandleInput)
 	router.GET("/version", ginGetVersion)
 	router.GET("/context", ginGetContext)
+	router.POST("/update-version", ginUpdateVersion)
 
 	// Set up health check
 	healthCheck := health.New(health.Options{

@@ -15,6 +15,7 @@ type ContextServiceClient struct {
 	Client        *httpclient.GenericClient[types.ContextResponse]
 	VersionClient *httpclient.GenericClient[types.VersionResponse]
 	DataClient    *httpclient.GenericClient[types.ContextDataResponse]
+	UpdateClient  *httpclient.GenericClient[types.VersionUpdateResponse]
 }
 
 type RemediationsServiceClient struct {
@@ -40,18 +41,18 @@ type WorkServerServiceClient struct {
 type RabbitMQServiceClient struct {
 	URL           string
 	QueueName     string
-	ContextClient *httpclient.RabbitClient[types.ContextInput]
-	VersionClient *httpclient.RabbitClient[types.VersionInfo]
-	PairsClient   *httpclient.RabbitClient[types.Pair]
-	SeedClient    *httpclient.RabbitClient[types.Ortho]
+	DBQueueClient *httpclient.RabbitClient[types.DBQueueItem]
 }
 
 func NewContextService(url string, client *httpclient.GenericClient[types.ContextResponse], versionClient *httpclient.GenericClient[types.VersionResponse], dataClient *httpclient.GenericClient[types.ContextDataResponse]) types.ContextService {
+	updateClient := httpclient.NewDefaultGenericClient[types.VersionUpdateResponse]()
+
 	return &ContextServiceClient{
 		URL:           url,
 		Client:        client,
 		VersionClient: versionClient,
 		DataClient:    dataClient,
+		UpdateClient:  updateClient,
 	}
 }
 
@@ -83,19 +84,17 @@ func NewWorkServerService(url string, pushClient *httpclient.GenericClient[types
 	}
 }
 
-func NewRabbitMQService(url string, queueName string,
-	contextClient *httpclient.RabbitClient[types.ContextInput],
-	versionClient *httpclient.RabbitClient[types.VersionInfo],
-	pairsClient *httpclient.RabbitClient[types.Pair],
-	seedClient *httpclient.RabbitClient[types.Ortho]) types.RabbitMQService {
+func NewRabbitMQService(url string, queueName string) (types.RabbitMQService, error) {
+	dbQueueClient, err := httpclient.NewRabbitClient[types.DBQueueItem](url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create DB queue client: %w", err)
+	}
+
 	return &RabbitMQServiceClient{
 		URL:           url,
 		QueueName:     queueName,
-		ContextClient: contextClient,
-		VersionClient: versionClient,
-		PairsClient:   pairsClient,
-		SeedClient:    seedClient,
-	}
+		DBQueueClient: dbQueueClient,
+	}, nil
 }
 
 func (s *ContextServiceClient) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
@@ -126,6 +125,20 @@ func (s *ContextServiceClient) GetContext(ctx context.Context) (types.ContextDat
 	if err != nil {
 		return types.ContextDataResponse{}, fmt.Errorf("error calling context data endpoint: %w", err)
 	}
+	return response, nil
+}
+
+func (s *ContextServiceClient) UpdateVersion(ctx context.Context, request types.VersionUpdateRequest) (types.VersionUpdateResponse, error) {
+	requestJSON, err := json.Marshal(request)
+	if err != nil {
+		return types.VersionUpdateResponse{}, fmt.Errorf("error marshaling version update request: %w", err)
+	}
+
+	response, err := s.UpdateClient.GenericCall(ctx, http.MethodPost, s.URL+"/update-version", requestJSON)
+	if err != nil {
+		return types.VersionUpdateResponse{}, fmt.Errorf("error calling context update version endpoint: %w", err)
+	}
+
 	return response, nil
 }
 
@@ -281,12 +294,17 @@ func (s *WorkServerServiceClient) Nack(ctx context.Context, id string) (types.Wo
 }
 
 func (s *RabbitMQServiceClient) PushContext(ctx context.Context, contextInput types.ContextInput) error {
-	contextJSON, err := json.Marshal(contextInput)
+	queueItem, err := types.CreateContextQueueItem(contextInput)
 	if err != nil {
-		return fmt.Errorf("failed to marshal context input: %w", err)
+		return fmt.Errorf("failed to create context queue item: %w", err)
 	}
 
-	if err := s.ContextClient.PushMessage(ctx, s.QueueName, contextJSON); err != nil {
+	itemJSON, err := json.Marshal(queueItem)
+	if err != nil {
+		return fmt.Errorf("failed to marshal context queue item: %w", err)
+	}
+
+	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
 		return fmt.Errorf("failed to push context to queue: %w", err)
 	}
 
@@ -294,12 +312,17 @@ func (s *RabbitMQServiceClient) PushContext(ctx context.Context, contextInput ty
 }
 
 func (s *RabbitMQServiceClient) PushVersion(ctx context.Context, version types.VersionInfo) error {
-	versionJSON, err := json.Marshal(version)
+	queueItem, err := types.CreateVersionQueueItem(version)
 	if err != nil {
-		return fmt.Errorf("failed to marshal version info: %w", err)
+		return fmt.Errorf("failed to create version queue item: %w", err)
 	}
 
-	if err := s.VersionClient.PushMessage(ctx, s.QueueName, versionJSON); err != nil {
+	itemJSON, err := json.Marshal(queueItem)
+	if err != nil {
+		return fmt.Errorf("failed to marshal version queue item: %w", err)
+	}
+
+	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
 		return fmt.Errorf("failed to push version to queue: %w", err)
 	}
 
@@ -307,18 +330,21 @@ func (s *RabbitMQServiceClient) PushVersion(ctx context.Context, version types.V
 }
 
 func (s *RabbitMQServiceClient) PushPairs(ctx context.Context, pairs []types.Pair) error {
-	// Create batch of messages
 	messages := make([][]byte, len(pairs))
-	var err error
 
 	for i, pair := range pairs {
-		messages[i], err = json.Marshal(pair)
+		queueItem, err := types.CreatePairQueueItem(pair)
 		if err != nil {
-			return fmt.Errorf("failed to marshal pair at index %d: %w", i, err)
+			return fmt.Errorf("failed to create pair queue item at index %d: %w", i, err)
+		}
+
+		messages[i], err = json.Marshal(queueItem)
+		if err != nil {
+			return fmt.Errorf("failed to marshal pair queue item at index %d: %w", i, err)
 		}
 	}
 
-	if err := s.PairsClient.PushMessageBatch(ctx, s.QueueName, messages); err != nil {
+	if err := s.DBQueueClient.PushMessageBatch(ctx, s.QueueName, messages); err != nil {
 		return fmt.Errorf("failed to push pairs to queue: %w", err)
 	}
 
@@ -326,12 +352,17 @@ func (s *RabbitMQServiceClient) PushPairs(ctx context.Context, pairs []types.Pai
 }
 
 func (s *RabbitMQServiceClient) PushSeed(ctx context.Context, seed types.Ortho) error {
-	seedJSON, err := json.Marshal(seed)
+	queueItem, err := types.CreateOrthoQueueItem(seed)
 	if err != nil {
-		return fmt.Errorf("failed to marshal seed ortho: %w", err)
+		return fmt.Errorf("failed to create ortho queue item: %w", err)
 	}
 
-	if err := s.SeedClient.PushMessage(ctx, s.QueueName, seedJSON); err != nil {
+	itemJSON, err := json.Marshal(queueItem)
+	if err != nil {
+		return fmt.Errorf("failed to marshal ortho queue item: %w", err)
+	}
+
+	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
 		return fmt.Errorf("failed to push seed ortho to queue: %w", err)
 	}
 

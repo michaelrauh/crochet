@@ -52,28 +52,18 @@ func main() {
 	defer mp.ShutdownWithTimeout(5 * time.Second)
 	defer pp.StopWithTimeout(5 * time.Second)
 
-	log.Printf("HTTP client options: DialTimeout=%v, DialKeepAlive=%v, MaxIdleConns=%d, ClientTimeout=%v",
-		cfg.DialTimeout, cfg.DialKeepAlive, cfg.MaxIdleConns, cfg.ClientTimeout)
-
-	// Initialize RabbitMQ clients for the DB Queue
-	// Used for storing context, version, pairs, seed, orthos, and remediations
-	log.Printf("Initializing DB queue clients for queue: %s", cfg.DBQueueName)
 	dbQueueClients, err := clients.NewRabbitMQClients(cfg.RabbitMQURL, cfg.DBQueueName)
 	if err != nil {
 		log.Fatalf("Failed to initialize DB queue RabbitMQ clients: %v", err)
 	}
 	defer dbQueueClients.CloseAll(context.Background())
 
-	// Initialize RabbitMQ client for the Work Queue
-	// Used for managing work items (pop and ack)
-	log.Printf("Initializing Work queue client for queue: %s", cfg.WorkQueueName)
 	workQueueClient, err := NewRabbitWorkQueueClient(cfg.RabbitMQURL)
 	if err != nil {
 		log.Fatalf("Failed to initialize Work queue RabbitMQ client: %v", err)
 	}
 	defer workQueueClient.Close(context.Background())
 
-	// Initialize clients for pushing orthos and remediations to DB queue
 	orthosClient, err := NewRabbitDBQueueClient[types.Ortho](cfg.RabbitMQURL)
 	if err != nil {
 		log.Fatalf("Failed to initialize Orthos client: %v", err)
@@ -95,7 +85,6 @@ func main() {
 		}
 	}()
 
-	// Create repository handler with all necessary client components
 	handler := NewRepositoryHandler(
 		ctxStore,
 		orthosCache,

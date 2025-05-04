@@ -44,6 +44,13 @@ type RabbitMQServiceClient struct {
 	DBQueueClient *httpclient.RabbitClient[types.DBQueueItem]
 }
 
+type RepositoryServiceClient struct {
+	URL           string
+	WorkClient    *httpclient.GenericClient[types.WorkResponse]
+	ContextClient *httpclient.GenericClient[types.ContextDataResponse]
+	ResultsClient *httpclient.GenericClient[types.ResultsResponse]
+}
+
 func NewContextService(url string, client *httpclient.GenericClient[types.ContextResponse], versionClient *httpclient.GenericClient[types.VersionResponse], dataClient *httpclient.GenericClient[types.ContextDataResponse]) types.ContextService {
 	updateClient := httpclient.NewDefaultGenericClient[types.VersionUpdateResponse]()
 
@@ -95,6 +102,19 @@ func NewRabbitMQService(url string, queueName string) (types.RabbitMQService, er
 		QueueName:     queueName,
 		DBQueueClient: dbQueueClient,
 	}, nil
+}
+
+func NewRepositoryService(url string) types.RepositoryService {
+	workClient := httpclient.NewDefaultGenericClient[types.WorkResponse]()
+	contextClient := httpclient.NewDefaultGenericClient[types.ContextDataResponse]()
+	resultsClient := httpclient.NewDefaultGenericClient[types.ResultsResponse]()
+
+	return &RepositoryServiceClient{
+		URL:           url,
+		WorkClient:    workClient,
+		ContextClient: contextClient,
+		ResultsClient: resultsClient,
+	}
 }
 
 func (s *ContextServiceClient) SendMessage(ctx context.Context, input types.ContextInput) (types.ContextResponse, error) {
@@ -367,4 +387,39 @@ func (s *RabbitMQServiceClient) PushSeed(ctx context.Context, seed types.Ortho) 
 	}
 
 	return nil
+}
+
+func (s *RepositoryServiceClient) GetWork(ctx context.Context) (*types.WorkItem, error) {
+	response, err := s.WorkClient.GenericCall(ctx, http.MethodGet, s.URL+"/work", nil)
+	if err != nil {
+		return nil, fmt.Errorf("error calling repository work endpoint: %w", err)
+	}
+	return response.Work, nil
+}
+
+func (s *RepositoryServiceClient) GetContext(ctx context.Context) (*types.ContextDataResponse, error) {
+	response, err := s.ContextClient.GenericCall(ctx, http.MethodGet, s.URL+"/context", nil)
+	if err != nil {
+		return nil, fmt.Errorf("error calling repository context endpoint: %w", err)
+	}
+	return &response, nil
+}
+
+func (s *RepositoryServiceClient) PostResults(ctx context.Context, orthos []types.Ortho, remediations []types.RemediationTuple) (*types.ResultsResponse, error) {
+	requestBody := types.ResultsRequest{
+		Orthos:       orthos,
+		Remediations: remediations,
+	}
+
+	requestJSON, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling results request: %w", err)
+	}
+
+	response, err := s.ResultsClient.GenericCall(ctx, http.MethodPost, s.URL+"/results", requestJSON)
+	if err != nil {
+		return nil, fmt.Errorf("error calling repository results endpoint: %w", err)
+	}
+
+	return &response, nil
 }

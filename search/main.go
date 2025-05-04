@@ -5,9 +5,9 @@ import (
 	"crochet/clients"
 	"crochet/config"
 	"crochet/health"
-	"crochet/httpclient"
 	"crochet/middleware"
 	"crochet/types"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
@@ -21,7 +21,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Global state for search processing
@@ -73,12 +72,8 @@ func init() {
 // ProcessWorkItem handles a single work item according to the pattern in work.md
 func ProcessWorkItem(
 	ctx context.Context,
-	contextService types.ContextService,
-	orthosService types.OrthosService,
-	remediationsService types.RemediationsService,
-	workServerService types.WorkServerService,
+	repositoryService types.RepositoryService,
 	ortho types.Ortho,
-	itemID string,
 ) {
 	// Create a span for the entire work item processing
 	tracer := otel.Tracer("search-worker")
@@ -90,14 +85,14 @@ func ProcessWorkItem(
 
 	// Add work item details to the span
 	span.SetAttributes(
-		attribute.String("work_item.id", itemID),
 		attribute.String("ortho.id", ortho.ID),
 	)
 
-	log.Printf("Processing work item with ID: %s", itemID)
+	log.Printf("Processing work for ortho ID: %s", ortho.ID)
 
 	// Use the string representation of the shape array as the shape label for metrics, to match other services
 	shapeStr := fmt.Sprintf("%v", ortho.Shape)
+
 	// Create position string for position-based metrics
 	positionStr := fmt.Sprintf("%v", ortho.Position)
 
@@ -105,11 +100,13 @@ func ProcessWorkItem(
 	searchesByShape.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("shape", shapeStr),
 	))
+
 	// Also record with position information
 	searchesByShapePosition.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("shape", shapeStr),
 		attribute.String("position", positionStr),
 	))
+
 	// Add it to Prometheus as well
 	prometheusSearchesByShapePosition.WithLabelValues(shapeStr, positionStr).Inc()
 
@@ -131,9 +128,12 @@ func ProcessWorkItem(
 	// Generate new orthos from candidates
 	newOrthos := GenerateNewOrthos(candidates, ortho)
 
-	// Add a span for saving orthos
-	ctx, saveSpan := tracer.Start(ctx, "save_orthos")
-	saveSpan.SetAttributes(attribute.Int("orthos_count", len(newOrthos)))
+	// Create a span for the results posting operation
+	ctx, resultsSpan := tracer.Start(ctx, "post_results")
+	resultsSpan.SetAttributes(
+		attribute.Int("orthos_count", len(newOrthos)),
+		attribute.Int("remediations_count", len(remediations)),
+	)
 
 	// Record metrics for whether items were found and how many
 	if len(newOrthos) > 0 {
@@ -141,11 +141,13 @@ func ProcessWorkItem(
 		searchSuccessByShape.Add(ctx, 1.0, metric.WithAttributes(
 			attribute.String("shape", shapeStr),
 		))
+
 		// Also record with position information
 		searchSuccessByShapePosition.Add(ctx, 1.0, metric.WithAttributes(
 			attribute.String("shape", shapeStr),
 			attribute.String("position", positionStr),
 		))
+
 		// Add it to Prometheus as well
 		prometheusSearchSuccessByShapePosition.WithLabelValues(shapeStr, positionStr).Inc()
 
@@ -153,6 +155,7 @@ func ProcessWorkItem(
 		itemsFoundByShape.Add(ctx, float64(len(newOrthos)), metric.WithAttributes(
 			attribute.String("shape", shapeStr),
 		))
+
 		// Also record with position information
 		itemsFoundByShapePosition.Add(ctx, float64(len(newOrthos)), metric.WithAttributes(
 			attribute.String("shape", shapeStr),
@@ -163,6 +166,7 @@ func ProcessWorkItem(
 		itemsFoundByShape.Add(ctx, 0.0, metric.WithAttributes(
 			attribute.String("shape", shapeStr),
 		))
+
 		// Also record with position information
 		itemsFoundByShapePosition.Add(ctx, 0.0, metric.WithAttributes(
 			attribute.String("shape", shapeStr),
@@ -170,116 +174,45 @@ func ProcessWorkItem(
 		))
 	}
 
-	// Step 1: Add new orthos to the database using SaveOrthos
-	if len(newOrthos) > 0 {
-		saveResponse, err := orthosService.SaveOrthos(ctx, newOrthos)
-		if err != nil {
-			saveSpan.RecordError(err)
-			saveSpan.End()
-			log.Printf("Error saving orthos: %v", err)
-			SendNack(ctx, workServerService, itemID, "Error saving orthos")
-			return
-		}
-		saveSpan.SetAttributes(attribute.Int("saved_count", saveResponse.Count))
-		log.Printf("Saved %d orthos", saveResponse.Count)
-	}
-	saveSpan.End()
-
-	// Step 2: Add remediations to the database
-	ctx, addRemSpan := tracer.Start(ctx, "add_remediations")
-	addRemSpan.SetAttributes(attribute.Int("remediations_count", len(remediations)))
-
-	if len(remediations) > 0 {
-		addResponse, err := remediationsService.AddRemediations(ctx, remediations)
-		if err != nil {
-			addRemSpan.RecordError(err)
-			addRemSpan.End()
-			log.Printf("Error adding remediations: %v", err)
-			SendNack(ctx, workServerService, itemID, "Error adding remediations")
-			return
-		}
-		addRemSpan.SetAttributes(attribute.Int("added_count", addResponse.Count))
-		log.Printf("Added %d remediations", addResponse.Count)
-	}
-	addRemSpan.End()
-
-	// Step 3: Push new orthos to the work server
-	ctx, pushSpan := tracer.Start(ctx, "push_orthos")
-	pushSpan.SetAttributes(attribute.Int("orthos_to_push", len(newOrthos)))
-
-	if len(newOrthos) > 0 {
-		pushResponse, err := workServerService.PushOrthos(ctx, newOrthos)
-		if err != nil {
-			pushSpan.RecordError(err)
-			pushSpan.End()
-			log.Printf("Error pushing orthos to work server: %v", err)
-			SendNack(ctx, workServerService, itemID, "Error pushing orthos to work server")
-			return
-		}
-		pushSpan.SetAttributes(attribute.Int("pushed_count", pushResponse.Count))
-		log.Printf("Pushed %d orthos to work server", pushResponse.Count)
-	}
-	pushSpan.End()
-
-	// Step 4: Check version again
-	ctx, verSpan := tracer.Start(ctx, "check_version")
-	versionResp, err := contextService.GetVersion(ctx)
+	// Post results (both orthos and remediations) to the repository
+	resultsResponse, err := repositoryService.PostResults(ctx, newOrthos, remediations)
 	if err != nil {
-		verSpan.RecordError(err)
-		verSpan.End()
-		log.Printf("Error checking context version: %v", err)
-		SendNack(ctx, workServerService, itemID, "Error checking context version")
+		resultsSpan.RecordError(err)
+		resultsSpan.End()
+		log.Printf("Error posting results: %v", err)
 		return
 	}
-	verSpan.SetAttributes(
-		attribute.Int("current_version", searchState.Version),
-		attribute.Int("service_version", versionResp.Version),
-	)
-	verSpan.End()
 
-	// Step 5: If version has changed, update context and NACK, otherwise ACK
-	if versionResp.Version != searchState.Version {
+	resultsSpan.SetAttributes(
+		attribute.Int("saved_orthos_count", resultsResponse.NewOrthosCount),
+		attribute.Int("saved_remediations_count", resultsResponse.RemediationsCount),
+	)
+	resultsSpan.End()
+
+	log.Printf("Posted results: %d new orthos, %d remediations",
+		resultsResponse.NewOrthosCount, resultsResponse.RemediationsCount)
+
+	// Check if version has changed in the repository response
+	if resultsResponse.Version != searchState.Version {
 		ctx, updateSpan := tracer.Start(ctx, "update_context")
 		updateSpan.SetAttributes(
 			attribute.Int("old_version", searchState.Version),
-			attribute.Int("new_version", versionResp.Version),
+			attribute.Int("new_version", resultsResponse.Version),
 		)
 
 		log.Printf("Context version changed from %d to %d, updating context",
-			searchState.Version, versionResp.Version)
+			searchState.Version, resultsResponse.Version)
 
 		// Update our context data
-		if err := UpdateContextData(ctx, contextService); err != nil {
+		if err := UpdateContextData(ctx, repositoryService); err != nil {
 			updateSpan.RecordError(err)
 			updateSpan.End()
 			log.Printf("Error updating context data: %v", err)
-			SendNack(ctx, workServerService, itemID, "Error updating context data")
 			return
 		}
 
 		updateSpan.End()
-
-		// NACK the work item to reprocess with the new context
-		ctx, nackSpan := tracer.Start(ctx, "nack_version_changed")
-		nackSpan.SetAttributes(attribute.String("reason", "context_version_changed"))
-		SendNackWithSpan(ctx, workServerService, itemID, "Context version changed", nackSpan)
-		return
 	}
-
-	// Everything succeeded, ACK the work item
-	ctx, ackSpan := tracer.Start(ctx, "ack_work_item")
-	ackResp, err := workServerService.Ack(ctx, itemID)
-	if err != nil {
-		ackSpan.RecordError(err)
-		ackSpan.End()
-		log.Printf("Error sending ACK: %v", err)
-		SendNack(ctx, workServerService, itemID, "Error sending ACK")
-		return
-	}
-	ackSpan.SetAttributes(attribute.String("ack_status", ackResp.Status))
-	ackSpan.End()
-
-	log.Printf("Sent ACK for work item: %s, response: %s", itemID, ackResp.Status)
 
 	// Calculate and record the processing time in seconds
 	processingTime := time.Since(startTime).Seconds()
@@ -292,40 +225,9 @@ func ProcessWorkItem(
 	log.Printf("Recorded processing time for ortho shape %s: %.3f seconds", shapeStr, processingTime)
 }
 
-// SendNack is a helper function to send a NACK with error logging
-func SendNack(_ context.Context, workServerService types.WorkServerService, itemID, reason string) {
-	log.Printf("Sending NACK for work item %s. Reason: %s", itemID, reason)
-	ackResp, err := workServerService.Nack(context.Background(), itemID)
-	if err != nil {
-		log.Printf("Error sending NACK: %v", err)
-		return
-	}
-	log.Printf("Sent NACK for work item: %s, response: %s", itemID, ackResp.Status)
-}
-
-// SendNackWithSpan is a helper function to send a NACK with error logging and tracing
-func SendNackWithSpan(_ context.Context, workServerService types.WorkServerService, itemID, reason string, span trace.Span) {
-	log.Printf("Sending NACK for work item %s. Reason: %s", itemID, reason)
-	ackResp, err := workServerService.Nack(context.Background(), itemID)
-	if err != nil {
-		log.Printf("Error sending NACK: %v", err)
-		span.RecordError(err)
-		span.End()
-		return
-	}
-	span.SetAttributes(attribute.String("nack_status", ackResp.Status))
-	span.End()
-	log.Printf("Sent NACK for work item: %s, response: %s", itemID, ackResp.Status)
-}
-
-// UpdateContextData fetches the latest context data from context service
-func UpdateContextData(ctx context.Context, contextService types.ContextService) error {
-	versionResp, err := contextService.GetVersion(ctx)
-	if err != nil {
-		return err
-	}
-
-	contextResp, err := contextService.GetContext(ctx)
+// UpdateContextData fetches the latest context data from repository service
+func UpdateContextData(ctx context.Context, repositoryService types.RepositoryService) error {
+	contextResp, err := repositoryService.GetContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -338,7 +240,7 @@ func UpdateContextData(ctx context.Context, contextService types.ContextService)
 	}
 
 	// Update search state
-	searchState.Version = versionResp.Version
+	searchState.Version = contextResp.Version
 	searchState.Vocabulary = contextResp.Vocabulary
 
 	// Update pairs from context lines
@@ -348,7 +250,7 @@ func UpdateContextData(ctx context.Context, contextService types.ContextService)
 	}
 
 	log.Printf("Updated context to version %d with %d vocabulary terms and %d lines",
-		versionResp.Version, len(searchState.Vocabulary), len(contextResp.Lines))
+		contextResp.Version, len(searchState.Vocabulary), len(contextResp.Lines))
 
 	return nil
 }
@@ -416,10 +318,7 @@ func GenerateNewOrthos(candidates []string, parent types.Ortho) []types.Ortho {
 // StartWorker begins the worker loop that processes items from the queue
 func StartWorker(
 	ctx context.Context,
-	contextService types.ContextService,
-	orthosService types.OrthosService,
-	remediationsService types.RemediationsService,
-	workServerService types.WorkServerService,
+	repositoryService types.RepositoryService,
 ) {
 	// Get a separate tracer for the worker
 	tracer := otel.Tracer("search-worker")
@@ -430,7 +329,7 @@ func StartWorker(
 
 	// Initialize the context on startup with a proper span
 	initCtx, initSpan := tracer.Start(workerCtx, "initialize_context")
-	if err := UpdateContextData(initCtx, contextService); err != nil {
+	if err := UpdateContextData(initCtx, repositoryService); err != nil {
 		log.Printf("Failed to initialize context data: %v", err)
 		initSpan.RecordError(err)
 		initSpan.End()
@@ -456,27 +355,25 @@ func StartWorker(
 		// Add a waiting span to show we're actively polling
 		_, waitSpan := tracer.Start(rootCtx, "waiting_for_work")
 
-		// Call the work server to get a work item with a dedicated span
-		popCtx, popSpan := tracer.Start(rootCtx, "pop_work_item")
-		popResp, err := workServerService.Pop(popCtx)
-
+		// Call the repository to get a work item with a dedicated span
+		workCtx, workSpan := tracer.Start(rootCtx, "get_work_item")
+		workItem, err := repositoryService.GetWork(workCtx)
 		if err != nil {
-			log.Printf("Error popping work item: %v", err)
-			popSpan.RecordError(err)
-			popSpan.End()
+			log.Printf("Error getting work item: %v", err)
+			workSpan.RecordError(err)
+			workSpan.End()
 			waitSpan.End()
 			rootSpan.End()
-
 			// Apply cooldown after error
 			time.Sleep(5 * time.Second) // Wait a bit before trying again
 			continue
 		}
 
-		// End the pop span now
-		popSpan.End()
+		// End the work span now
+		workSpan.End()
 
 		// Record whether we got an item
-		hasWork := popResp.Ortho != nil && popResp.ID != ""
+		hasWork := workItem != nil && workItem.Data != nil
 		rootSpan.SetAttributes(attribute.Bool("has_work", hasWork))
 
 		// If no item is available, wait and try again
@@ -485,7 +382,6 @@ func StartWorker(
 			waitSpan.SetAttributes(attribute.Bool("found_work", false))
 			waitSpan.End()
 			rootSpan.End()
-
 			// Apply cooldown when no work is available
 			time.Sleep(5 * time.Second)
 			continue
@@ -495,11 +391,32 @@ func StartWorker(
 		waitSpan.SetAttributes(attribute.Bool("found_work", true))
 		waitSpan.End()
 
+		// Convert the work item data to an Ortho
+		var ortho types.Ortho
+
+		// Convert interface{} to Ortho type
+		dataBytes, err := json.Marshal(workItem.Data)
+		if err != nil {
+			log.Printf("Error marshaling work item data: %v", err)
+			rootSpan.RecordError(err)
+			rootSpan.End()
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if err := json.Unmarshal(dataBytes, &ortho); err != nil {
+			log.Printf("Error unmarshaling work item data to Ortho: %v", err)
+			rootSpan.RecordError(err)
+			rootSpan.End()
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
 		// Process the work item inside a span
 		processCtx, processSpan := tracer.Start(rootCtx, "process_work_item")
 		processSpan.SetAttributes(
-			attribute.String("work_item.id", popResp.ID),
-			attribute.String("ortho.id", popResp.Ortho.ID),
+			attribute.String("work_item.id", workItem.ID),
+			attribute.String("ortho.id", ortho.ID),
 		)
 
 		// Track if we had an error during processing
@@ -514,15 +431,6 @@ func StartWorker(
 					log.Println(errMsg)
 					// Fix the non-constant format string error in fmt.Errorf
 					processSpan.RecordError(fmt.Errorf("%s", errMsg))
-
-					// Try to NACK the item after a panic
-					nackCtx, nackSpan := tracer.Start(rootCtx, "nack_after_panic")
-					_, nackErr := workServerService.Nack(nackCtx, popResp.ID)
-					if nackErr != nil {
-						nackSpan.RecordError(nackErr)
-					}
-					nackSpan.End()
-
 					// Mark that we had an error
 					hadProcessingError = true
 				}
@@ -532,12 +440,8 @@ func StartWorker(
 			// Process the work item
 			ProcessWorkItem(
 				processCtx,
-				contextService,
-				orthosService,
-				remediationsService,
-				workServerService,
-				*popResp.Ortho,
-				popResp.ID,
+				repositoryService,
+				ortho,
 			)
 		}()
 
@@ -557,13 +461,8 @@ func StartWorker(
 // main function starts the service
 func main() {
 	// Load configuration
-	var cfg config.SearchConfig
-
-	// Set service name before loading config
-	cfg.ServiceName = "search"
-
-	// Process environment variables with the appropriate prefix
-	if err := config.LoadConfig("SEARCH", &cfg); err != nil {
+	cfg, err := config.LoadSearchConfig()
+	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
@@ -664,33 +563,18 @@ func main() {
 		log.Fatalf("Failed to create items found by shape and position metric: %v", err2)
 	}
 
+	if err2 != nil {
+		log.Fatalf("Failed to create repository GetContext duration metric: %v", err2)
+	}
+
 	// Set the global TextMapPropagator for OpenTelemetry
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
 
-	// Initialize generic clients for context service
-	contextClient := httpclient.NewDefaultGenericClient[types.ContextResponse]()
-	versionClient := httpclient.NewDefaultGenericClient[types.VersionResponse]()
-	dataClient := httpclient.NewDefaultGenericClient[types.ContextDataResponse]()
-
-	remediationClient := httpclient.NewDefaultGenericClient[types.RemediationResponse]()
-	addRemediationClient := httpclient.NewDefaultGenericClient[types.AddRemediationResponse]()
-	deleteRemediationClient := httpclient.NewDefaultGenericClient[types.DeleteRemediationResponse]()
-
-	getOrthosClient := httpclient.NewDefaultGenericClient[types.OrthosResponse]()
-	saveOrthosClient := httpclient.NewDefaultGenericClient[types.OrthosSaveResponse]()
-
-	pushClient := httpclient.NewDefaultGenericClient[types.WorkServerPushResponse]()
-	popClient := httpclient.NewDefaultGenericClient[types.WorkServerPopResponse]()
-	ackClient := httpclient.NewDefaultGenericClient[types.WorkServerAckResponse]()
-
-	// Initialize service clients
-	contextService := clients.NewContextService(cfg.ContextServiceURL, contextClient, versionClient, dataClient)
-	orthosService := clients.NewOrthosService(cfg.OrthosServiceURL, getOrthosClient, saveOrthosClient)
-	remediationsService := clients.NewRemediationsService(cfg.RemediationsServiceURL, remediationClient, deleteRemediationClient, addRemediationClient)
-	workServerService := clients.NewWorkServerService(cfg.WorkServerURL, pushClient, popClient, ackClient)
+	// Initialize the repository service client
+	repositoryService := clients.NewRepositoryService(cfg.RepositoryServiceURL)
 
 	// Initialize searchState
 	searchState = &State{
@@ -700,11 +584,7 @@ func main() {
 	}
 
 	// Log the initialization of service
-	log.Printf("Search service initialized with the following service URLs:")
-	log.Printf("  Orthos: %s", cfg.OrthosServiceURL)
-	log.Printf("  Remediations: %s", cfg.RemediationsServiceURL)
-	log.Printf("  Context: %s", cfg.ContextServiceURL)
-	log.Printf("  WorkServer: %s", cfg.WorkServerURL)
+	log.Printf("Search service initialized with Repository service URL: %s", cfg.RepositoryServiceURL)
 
 	// Seed the random number generator
 	rand.Seed(time.Now().UnixNano())
@@ -712,14 +592,7 @@ func main() {
 	// Start the worker in a goroutine
 	workerCtx, cancelWorker := context.WithCancel(context.Background())
 	defer cancelWorker() // Ensure we stop the worker when the main function exits
-
-	go StartWorker(
-		workerCtx,
-		contextService,
-		orthosService,
-		remediationsService,
-		workServerService,
-	)
+	go StartWorker(workerCtx, repositoryService)
 
 	// Create health check service with appropriate options
 	healthOptions := health.Options{

@@ -117,3 +117,11 @@ type RabbitMQService interface {
 	// PushSeed pushes seed ortho data to a RabbitMQ queue
 	PushSeed(ctx context.Context, seed Ortho) error
 }
+
+// RepositoryService defines the interface for interacting with the repository service
+// This implements the worker_process.md design where the Worker interfaces with a single Repository service
+type RepositoryService interface {
+	GetWork(ctx context.Context) (*WorkItem, error)
+	GetContext(ctx context.Context) (*ContextDataResponse, error)
+	PostResults(ctx context.Context, orthos []Ortho, remediations []RemediationTuple) (*ResultsResponse, error)
+}

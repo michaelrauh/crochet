@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,28 +128,18 @@ func (m *MockContextStore) Close() error {
 	return args.Error(0)
 }
 
-// MockOrthosCache implements the OrthosCache interface for testing
-type MockOrthosCache struct {
-	mock.Mock
+func (m *MockContextStore) GetOrthoCount() (int, error) {
+	args := m.Called()
+	return args.Int(0), args.Error(1)
 }
 
-func (m *MockOrthosCache) FilterNewOrthos(orthos []types.Ortho) []types.Ortho {
+func (m *MockContextStore) GetOrthoCountByShapePosition() (map[string]map[string]int, error) {
+	args := m.Called()
+	return args.Get(0).(map[string]map[string]int), args.Error(1)
+}
+
+func (m *MockContextStore) SaveOrthos(orthos []types.Ortho) error {
 	args := m.Called(orthos)
-	return args.Get(0).([]types.Ortho)
-}
-
-// MockDBQueueClient implements the DBQueueClient interface for testing
-type MockDBQueueClient struct {
-	mock.Mock
-}
-
-func (m *MockDBQueueClient) PushMessage(ctx context.Context, queueName string, message []byte) error {
-	args := m.Called(ctx, queueName, message)
-	return args.Error(0)
-}
-
-func (m *MockDBQueueClient) Close(ctx context.Context) error {
-	args := m.Called(ctx)
 	return args.Error(0)
 }
 
@@ -177,6 +168,16 @@ func (m *MockWorkQueueClient) AckByDeliveryTag(ctx context.Context, tag uint64) 
 	return args.Error(0)
 }
 
+// MockOrthosCache implements the OrthosCache interface for testing
+type MockOrthosCache struct {
+	mock.Mock
+}
+
+func (m *MockOrthosCache) FilterNewOrthos(orthos []types.Ortho) []types.Ortho {
+	args := m.Called(orthos)
+	return args.Get(0).([]types.Ortho)
+}
+
 func TestHandleGetContext(t *testing.T) {
 	mockStore := new(MockContextStore)
 	mockStore.On("GetVocabulary").Return([]string{"test", "vocabulary", "words"})
@@ -185,21 +186,15 @@ func TestHandleGetContext(t *testing.T) {
 		{"another", "line"},
 	})
 	mockStore.On("GetVersion").Return(1, nil)
-
 	mockRabbitMQ := new(MockRabbitMQService)
-	mockCache := new(MockOrthosCache)
-
 	mockWorkQueueClient := new(MockWorkQueueClient)
-	mockOrthosClient := new(MockDBQueueClient)
-	mockRemediationsClient := new(MockDBQueueClient)
+	mockOrthosCache := new(MockOrthosCache)
 
 	handler := NewRepositoryHandler(
 		mockStore,
-		mockCache,
+		mockOrthosCache,
 		mockRabbitMQ,
 		mockWorkQueueClient,
-		mockOrthosClient,
-		mockRemediationsClient,
 		config.RepositoryConfig{},
 	)
 
@@ -208,15 +203,12 @@ func TestHandleGetContext(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodGet, "/context", nil)
 	w := httptest.NewRecorder()
-
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-
 	var response map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-
 	assert.Contains(t, response, "version")
 	assert.Equal(t, float64(1), response["version"])
 
@@ -230,32 +222,25 @@ func TestHandleGetContext(t *testing.T) {
 	lines, ok := response["lines"].([]interface{})
 	assert.True(t, ok)
 	assert.Len(t, lines, 2)
-
 	mockStore.AssertExpectations(t)
 }
 
 func TestHandlePostCorpus(t *testing.T) {
 	mockStore := new(MockContextStore)
-
 	mockRabbitMQ := new(MockRabbitMQService)
 	mockRabbitMQ.On("PushContext", mock.Anything, mock.AnythingOfType("types.ContextInput")).Return(nil)
 	mockRabbitMQ.On("PushVersion", mock.Anything, mock.AnythingOfType("types.VersionInfo")).Return(nil)
 	mockRabbitMQ.On("PushPairs", mock.Anything, mock.AnythingOfType("[]types.Pair")).Return(nil)
 	mockRabbitMQ.On("PushSeed", mock.Anything, mock.AnythingOfType("types.Ortho")).Return(nil)
 
-	mockCache := new(MockOrthosCache)
-
 	mockWorkQueueClient := new(MockWorkQueueClient)
-	mockOrthosClient := new(MockDBQueueClient)
-	mockRemediationsClient := new(MockDBQueueClient)
+	mockOrthosCache := new(MockOrthosCache)
 
 	handler := NewRepositoryHandler(
 		mockStore,
-		mockCache,
+		mockOrthosCache,
 		mockRabbitMQ,
 		mockWorkQueueClient,
-		mockOrthosClient,
-		mockRemediationsClient,
 		config.RepositoryConfig{},
 	)
 
@@ -266,54 +251,45 @@ func TestHandlePostCorpus(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, "/corpora", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusAccepted, w.Code)
-
 	var response map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-
 	assert.Equal(t, "success", response["status"])
 	assert.Equal(t, "Corpus processing initiated", response["message"])
-
 	mockRabbitMQ.AssertExpectations(t)
 }
 
 func TestHandleGetWork(t *testing.T) {
 	mockStore := new(MockContextStore)
 	mockStore.On("GetVersion").Return(1, nil)
-
 	mockRabbitMQ := new(MockRabbitMQService)
-
-	mockCache := new(MockOrthosCache)
-
 	mockWorkQueueClient := new(MockWorkQueueClient)
+	mockOrthosCache := new(MockOrthosCache)
+
 	timestamp := time.Now().Unix()
 	workItem := types.WorkItem{
 		ID:        "test-id-12345",
 		Data:      map[string]interface{}{"key": "value"},
 		Timestamp: timestamp,
 	}
+
 	mockMessages := []RabbitMessage{
 		{
 			DeliveryTag: 12345,
 			Data:        workItem,
 		},
 	}
-	mockWorkQueueClient.On("PopMessagesFromQueue", mock.Anything, "test_work_queue", 1).Return(mockMessages, nil)
 
-	mockOrthosClient := new(MockDBQueueClient)
-	mockRemediationsClient := new(MockDBQueueClient)
+	mockWorkQueueClient.On("PopMessagesFromQueue", mock.Anything, "test_work_queue", 1).Return(mockMessages, nil)
 
 	handler := NewRepositoryHandler(
 		mockStore,
-		mockCache,
+		mockOrthosCache,
 		mockRabbitMQ,
 		mockWorkQueueClient,
-		mockOrthosClient,
-		mockRemediationsClient,
 		config.RepositoryConfig{
 			WorkQueueName: "test_work_queue",
 		},
@@ -324,7 +300,6 @@ func TestHandleGetWork(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodGet, "/work", nil)
 	w := httptest.NewRecorder()
-
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -332,10 +307,14 @@ func TestHandleGetWork(t *testing.T) {
 	var response types.WorkResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-
 	assert.Equal(t, 1, response.Version)
 	assert.NotNil(t, response.Work)
-	assert.Equal(t, "test-id-12345", response.Work.ID)
+
+	// We're not checking the exact ID anymore since it's dynamically generated
+	// Just make sure it starts with "work-" and is not empty
+	assert.NotEmpty(t, response.Work.ID)
+	assert.True(t, strings.HasPrefix(response.Work.ID, "work-"), "Work ID should start with 'work-'")
+
 	assert.Equal(t, "12345", response.Receipt)
 
 	mockStore.AssertExpectations(t)
@@ -345,10 +324,11 @@ func TestHandleGetWork(t *testing.T) {
 func TestHandlePostResults(t *testing.T) {
 	mockStore := new(MockContextStore)
 	mockStore.On("GetVersion").Return(1, nil)
-
 	mockRabbitMQ := new(MockRabbitMQService)
+	mockWorkQueueClient := new(MockWorkQueueClient)
+	mockWorkQueueClient.On("AckByDeliveryTag", mock.Anything, uint64(12345)).Return(nil)
+	mockOrthosCache := new(MockOrthosCache)
 
-	mockCache := new(MockOrthosCache)
 	newOrthos := []types.Ortho{
 		{
 			ID:       "test-ortho-id",
@@ -358,33 +338,9 @@ func TestHandlePostResults(t *testing.T) {
 			Shell:    0,
 		},
 	}
-	mockCache.On("FilterNewOrthos", mock.AnythingOfType("[]types.Ortho")).Return(newOrthos)
 
-	mockWorkQueueClient := new(MockWorkQueueClient)
-	mockWorkQueueClient.On("AckByDeliveryTag", mock.Anything, uint64(12345)).Return(nil)
-
-	mockOrthosClient := new(MockDBQueueClient)
-	mockOrthosClient.On("PushMessage", mock.Anything, "test_db_queue", mock.Anything).Return(nil)
-
-	mockRemediationsClient := new(MockDBQueueClient)
-	mockRemediationsClient.On("PushMessage", mock.Anything, "test_db_queue", mock.Anything).Return(nil)
-
-	handler := NewRepositoryHandler(
-		mockStore,
-		mockCache,
-		mockRabbitMQ,
-		mockWorkQueueClient,
-		mockOrthosClient,
-		mockRemediationsClient,
-		config.RepositoryConfig{
-			DBQueueName: "test_db_queue",
-		},
-	)
-
-	router := setupGinRouter()
-	router.POST("/results", handler.HandlePostResults)
-
-	orthos := []types.Ortho{
+	// Create request orthos that will be filtered to newOrthos
+	requestOrthos := []types.Ortho{
 		{
 			ID:       "test-ortho-id",
 			Grid:     map[string]string{"0,0": "test1"},
@@ -393,38 +349,109 @@ func TestHandlePostResults(t *testing.T) {
 			Shell:    0,
 		},
 	}
-	remediations := []types.RemediationTuple{
-		{
-			Pair: []string{"word1", "word2"},
-		},
-	}
+
+	mockOrthosCache.On("FilterNewOrthos", requestOrthos).Return(newOrthos)
+	mockStore.On("SaveOrthos", newOrthos).Return(nil)
+
+	handler := NewRepositoryHandler(
+		mockStore,
+		mockOrthosCache,
+		mockRabbitMQ,
+		mockWorkQueueClient,
+		config.RepositoryConfig{},
+	)
+
+	router := setupGinRouter()
+	router.POST("/results", handler.HandlePostResults)
+
 	requestBody := types.ResultsRequest{
-		Orthos:       orthos,
-		Remediations: remediations,
-		Receipt:      "12345",
+		Receipt: "12345",
+		Orthos:  requestOrthos,
 	}
 	jsonBody, _ := json.Marshal(requestBody)
-
 	req, _ := http.NewRequest(http.MethodPost, "/results", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
 
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response types.ResultsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "success", response.Status)
+	assert.Equal(t, 1, response.Version)
+	assert.Equal(t, 1, response.NewOrthosCount)
+
+	mockStore.AssertExpectations(t)
+	mockWorkQueueClient.AssertExpectations(t)
+	mockOrthosCache.AssertExpectations(t)
+}
+
+// TestHandleGetResults tests the GET /results endpoint
+func TestHandleGetResults(t *testing.T) {
+	mockStore := new(MockContextStore)
+
+	// Setup mock for GetOrthoCount
+	mockStore.On("GetOrthoCount").Return(42, nil)
+
+	// Setup mock for GetOrthoCountByShapePosition
+	countsByShapePosition := map[string]map[string]int{
+		"[2,2]": {
+			"[0,0]": 10,
+			"[1,0]": 8,
+		},
+		"[3,2]": {
+			"[0,0]": 12,
+			"[1,0]": 6,
+			"[2,0]": 6,
+		},
+	}
+	mockStore.On("GetOrthoCountByShapePosition").Return(countsByShapePosition, nil)
+
+	mockRabbitMQ := new(MockRabbitMQService)
+	mockWorkQueueClient := new(MockWorkQueueClient)
+	mockOrthosCache := new(MockOrthosCache)
+
+	handler := NewRepositoryHandler(
+		mockStore,
+		mockOrthosCache,
+		mockRabbitMQ,
+		mockWorkQueueClient,
+		config.RepositoryConfig{},
+	)
+
+	router := setupGinRouter()
+	router.GET("/results", handler.HandleGetResults)
+
+	req, _ := http.NewRequest(http.MethodGet, "/results", nil)
+	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response types.ResultsResponse
+	var response map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 
-	assert.Equal(t, "success", response.Status)
-	assert.Equal(t, 1, response.Version)
-	assert.Equal(t, 1, response.NewOrthosCount)
-	assert.Equal(t, 1, response.RemediationsCount)
+	assert.Equal(t, "success", response["status"])
+	assert.Equal(t, float64(42), response["totalCount"])
+
+	counts, ok := response["counts"].(map[string]interface{})
+	assert.True(t, ok)
+	assert.Len(t, counts, 2)
+
+	// Check counts for shape [2,2]
+	shape1, ok := counts["[2,2]"].(map[string]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, float64(10), shape1["[0,0]"])
+	assert.Equal(t, float64(8), shape1["[1,0]"])
+
+	// Check counts for shape [3,2]
+	shape2, ok := counts["[3,2]"].(map[string]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, float64(12), shape2["[0,0]"])
+	assert.Equal(t, float64(6), shape2["[1,0]"])
+	assert.Equal(t, float64(6), shape2["[2,0]"])
 
 	mockStore.AssertExpectations(t)
-	mockCache.AssertExpectations(t)
-	mockWorkQueueClient.AssertExpectations(t)
-	mockOrthosClient.AssertExpectations(t)
-	mockRemediationsClient.AssertExpectations(t)
 }

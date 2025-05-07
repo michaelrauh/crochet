@@ -117,39 +117,76 @@ func (m *MessageWithAck[T]) Nack() error {
 func NewRabbitClient[T any](url string) (*RabbitClient[T], error) {
 	// Initialize tracer
 	tracer := otel.Tracer("github.com/crochet/httpclient/rabbit")
-
 	// Create a span for the connection setup
 	ctx := context.Background()
 	var span trace.Span
 	ctx, span = tracer.Start(ctx, "rabbitmq.connect")
 	defer span.End()
 
+	// Add detailed connection logging
+	log.Printf("DIAG: Attempting to connect to RabbitMQ at URL: %s", url)
+
 	// Add connection details to span
 	span.SetAttributes(attribute.String("rabbitmq.url", url))
 
 	conn, err := amqp.Dial(url)
 	if err != nil {
+		log.Printf("DIAG: RabbitMQ connection error: %v", err)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to connect to RabbitMQ")
 		return nil, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
 	}
+	log.Printf("DIAG: Successfully connected to RabbitMQ at %s", url)
+
+	// Log server properties if available
+	if conn.Properties != nil {
+		log.Printf("DIAG: Connected to RabbitMQ server with properties: %+v", conn.Properties)
+	}
+
+	// Set up connection close notification
+	connCloseChan := make(chan *amqp.Error, 1)
+	conn.NotifyClose(connCloseChan)
+	go func() {
+		err := <-connCloseChan
+		if err != nil {
+			log.Printf("DIAG: RabbitMQ connection closed with error: %v", err)
+		} else {
+			log.Printf("DIAG: RabbitMQ connection closed gracefully")
+		}
+	}()
 
 	ch, err := conn.Channel()
 	if err != nil {
+		log.Printf("DIAG: Failed to open RabbitMQ channel: %v", err)
 		conn.Close()
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to open channel")
 		return nil, fmt.Errorf("failed to open a channel: %w", err)
 	}
+	log.Printf("DIAG: Successfully opened RabbitMQ channel")
+
+	// Set up channel close notification
+	chanCloseChan := make(chan *amqp.Error, 1)
+	ch.NotifyClose(chanCloseChan)
+	go func() {
+		err := <-chanCloseChan
+		if err != nil {
+			log.Printf("DIAG: RabbitMQ channel closed with error: %v", err)
+		} else {
+			log.Printf("DIAG: RabbitMQ channel closed gracefully")
+		}
+	}()
 
 	// Enable publisher confirms
 	if err := ch.Confirm(false); err != nil {
+		log.Printf("DIAG: Failed to enable confirm mode on channel: %v", err)
 		ch.Close()
 		conn.Close()
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to enable confirm mode")
 		return nil, fmt.Errorf("failed to put channel in confirm mode: %w", err)
 	}
+	log.Printf("DIAG: Successfully enabled publisher confirms")
 
 	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 	span.SetStatus(codes.Ok, "RabbitMQ client initialized successfully")
@@ -162,15 +199,17 @@ func NewRabbitClient[T any](url string) (*RabbitClient[T], error) {
 	}, nil
 }
 
-// DeclareQueue declares a queue to ensure it exists
+// DeclareQueue ensures that the specified queue exists
 func (c *RabbitClient[T]) DeclareQueue(ctx context.Context, queueName string) error {
 	var span trace.Span
 	ctx, span = c.tracer.Start(ctx, "rabbitmq.declare_queue")
 	defer span.End()
 
-	span.SetAttributes(attribute.String("rabbitmq.queue", queueName))
+	log.Printf("DIAG: Declaring queue: %s", queueName)
+	log.Printf("DIAG: Connection state before queue declaration - closed: %v", c.conn.IsClosed())
+	log.Printf("DIAG: Channel state before queue declaration - closed: %v", c.channel.IsClosed())
 
-	_, err := c.channel.QueueDeclare(
+	queue, err := c.channel.QueueDeclare(
 		queueName, // name
 		true,      // durable
 		false,     // delete when unused
@@ -178,13 +217,16 @@ func (c *RabbitClient[T]) DeclareQueue(ctx context.Context, queueName string) er
 		false,     // no-wait
 		nil,       // arguments
 	)
+
 	if err != nil {
+		log.Printf("DIAG: Failed to declare queue %s: %v", queueName, err)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to declare queue")
 		return fmt.Errorf("failed to declare queue: %w", err)
 	}
 
-	span.SetStatus(codes.Ok, "Queue declared successfully")
+	log.Printf("DIAG: Queue %s declared successfully: %+v", queueName, queue)
+	span.SetStatus(codes.Ok, "queue declared successfully")
 	return nil
 }
 
@@ -199,7 +241,27 @@ func (c *RabbitClient[T]) PushMessage(ctx context.Context, queueName string, mes
 		attribute.Int("rabbitmq.message.size", len(message)),
 	)
 
+	requestID := "unknown"
+	if ctx.Value("request_id") != nil {
+		requestID = fmt.Sprintf("%v", ctx.Value("request_id"))
+	}
+
+	log.Printf("DIAG[%s]: Publishing message to queue %s, message size: %d bytes", requestID, queueName, len(message))
+	log.Printf("DIAG[%s]: Connection state before publish - closed: %v", requestID, c.conn.IsClosed())
+	log.Printf("DIAG[%s]: Channel state before publish - closed: %v", requestID, c.channel.IsClosed())
+	log.Printf("DIAG[%s]: Message content: %s", requestID, string(message[:min(len(message), 500)]))
+
+	if c.conn.IsClosed() || c.channel.IsClosed() {
+		err := fmt.Errorf("cannot publish: connection or channel is closed")
+		log.Printf("DIAG[%s]: %v", requestID, err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "connection or channel is closed")
+		return err
+	}
+
 	// Publish the message
+	log.Printf("DIAG[%s]: About to publish message to queue %s", requestID, queueName)
+
 	err := c.channel.PublishWithContext(
 		ctx,
 		"",        // exchange
@@ -212,40 +274,43 @@ func (c *RabbitClient[T]) PushMessage(ctx context.Context, queueName string, mes
 			DeliveryMode: amqp.Persistent, // Make message persistent
 		},
 	)
+
 	if err != nil {
+		log.Printf("DIAG[%s]: Failed to publish message: %v", requestID, err)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to publish message")
 		return fmt.Errorf("failed to publish message: %w", err)
 	}
+
+	log.Printf("DIAG[%s]: Message published, waiting for confirmation", requestID)
 
 	// Wait for confirmation with a timeout
 	select {
 	case confirm := <-c.confirms:
 		if !confirm.Ack {
 			err := fmt.Errorf("message rejected by server")
+			log.Printf("DIAG[%s]: Message rejected by server, delivery tag: %d", requestID, confirm.DeliveryTag)
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "message rejected by server")
 			return err
 		}
-		span.SetStatus(codes.Ok, "Message published and acknowledged")
+		log.Printf("DIAG[%s]: Message confirmed by server, delivery tag: %d", requestID, confirm.DeliveryTag)
+		span.SetStatus(codes.Ok, "message published successfully")
 		return nil
-	case <-ctx.Done():
-		err := fmt.Errorf("confirmation timed out: %w", ctx.Err())
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "confirmation timed out")
-		return err
 	case <-time.After(5 * time.Second):
-		err := fmt.Errorf("confirmation timed out after 5 seconds")
+		err := fmt.Errorf("timeout waiting for confirmation")
+		log.Printf("DIAG[%s]: %v", requestID, err)
 		span.RecordError(err)
-		span.SetStatus(codes.Error, "confirmation timed out after 5 seconds")
+		span.SetStatus(codes.Error, "timeout waiting for confirmation")
 		return err
 	}
 }
 
-// PushMessageBatch publishes multiple messages to the specified queue and waits for all acknowledgements
+// PushMessageBatch publishes multiple messages to the specified queue
+// This method is missing from the original implementation but is called in clients/services.go
 func (c *RabbitClient[T]) PushMessageBatch(ctx context.Context, queueName string, messages [][]byte) error {
 	var span trace.Span
-	ctx, span = c.tracer.Start(ctx, "rabbitmq.publish_batch")
+	ctx, span = c.tracer.Start(ctx, "rabbitmq.publish_message_batch")
 	defer span.End()
 
 	span.SetAttributes(
@@ -253,206 +318,46 @@ func (c *RabbitClient[T]) PushMessageBatch(ctx context.Context, queueName string
 		attribute.Int("rabbitmq.batch.size", len(messages)),
 	)
 
-	// Set up a confirmation counter
-	publishCount := 0
-	confirmCount := 0
+	requestID := "unknown"
+	if ctx.Value("request_id") != nil {
+		requestID = fmt.Sprintf("%v", ctx.Value("request_id"))
+	}
 
-	// Create a channel to collect confirmation results
-	confirmResults := make(chan error, len(messages))
+	log.Printf("DIAG[%s]: Publishing batch of %d messages to queue %s",
+		requestID, len(messages), queueName)
 
-	// Set up a goroutine to collect confirmations
-	go func() {
-		for publishCount > confirmCount {
-			select {
-			case confirm := <-c.confirms:
-				confirmCount++
-				if !confirm.Ack {
-					confirmResults <- fmt.Errorf("message %d was rejected by the server", confirm.DeliveryTag)
-				}
-			case <-ctx.Done():
-				confirmResults <- fmt.Errorf("context canceled while waiting for confirmations: %w", ctx.Err())
-				return
-			case <-time.After(5 * time.Second):
-				confirmResults <- fmt.Errorf("timed out waiting for message confirmations")
-				return
-			}
-		}
-		close(confirmResults)
-	}()
+	// First ensure queue exists
+	err := c.DeclareQueue(ctx, queueName)
+	if err != nil {
+		log.Printf("DIAG[%s]: Failed to declare queue %s before batch publish: %v",
+			requestID, queueName, err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to declare queue")
+		return err
+	}
 
-	// Publish all messages first
+	// Publish each message individually
 	for i, message := range messages {
-		// Create child span for each message
-		var msgSpan trace.Span
-		publishCtx, msgSpan := c.tracer.Start(ctx, "rabbitmq.publish_batch_message")
-		msgSpan.SetAttributes(
-			attribute.Int("rabbitmq.message.index", i),
-			attribute.Int("rabbitmq.message.size", len(message)),
-		)
+		log.Printf("DIAG[%s]: Publishing message %d/%d to queue %s",
+			requestID, i+1, len(messages), queueName)
 
-		err := c.channel.PublishWithContext(
-			publishCtx,
-			"",        // exchange
-			queueName, // routing key
-			true,      // mandatory
-			false,     // immediate
-			amqp.Publishing{
-				ContentType:  "application/json",
-				Body:         message,
-				DeliveryMode: amqp.Persistent, // Make message persistent
-			},
-		)
+		err := c.PushMessage(ctx, queueName, message)
 		if err != nil {
-			msgSpan.RecordError(err)
-			msgSpan.SetStatus(codes.Error, "failed to publish message")
-			msgSpan.End()
+			log.Printf("DIAG[%s]: Failed to publish message %d/%d to queue %s: %v",
+				requestID, i+1, len(messages), queueName, err)
 			span.RecordError(err)
-			span.SetStatus(codes.Error, "batch publish failed")
-			return fmt.Errorf("failed to publish message %d: %w", i, err)
-		}
-		msgSpan.SetStatus(codes.Ok, "Message published")
-		msgSpan.End()
-		publishCount++
-	}
-
-	// Wait for and collect all confirmation results
-	for err := range confirmResults {
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "batch publish failed during confirmation")
-			return err
+			span.SetStatus(codes.Error, fmt.Sprintf("failed to publish message %d/%d", i+1, len(messages)))
+			return fmt.Errorf("failed to publish message %d/%d: %w", i+1, len(messages), err)
 		}
 	}
 
-	span.SetStatus(codes.Ok, "Batch published and acknowledged")
+	log.Printf("DIAG[%s]: Successfully published batch of %d messages to queue %s",
+		requestID, len(messages), queueName)
+	span.SetStatus(codes.Ok, fmt.Sprintf("Successfully published %d messages", len(messages)))
 	return nil
 }
 
-// SetupConsumer prepares a channel for consuming messages with appropriate QoS settings
-func (c *RabbitClient[T]) SetupConsumer(ctx context.Context, queueName string, prefetchCount int) (<-chan amqp.Delivery, error) {
-	var span trace.Span
-	ctx, span = c.tracer.Start(ctx, "rabbitmq.setup_consumer")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("rabbitmq.queue", queueName),
-		attribute.Int("rabbitmq.prefetch_count", prefetchCount),
-	)
-
-	// Ensure the queue exists
-	_, err := c.channel.QueueDeclare(
-		queueName, // name
-		true,      // durable
-		false,     // delete when unused
-		false,     // exclusive
-		false,     // no-wait
-		nil,       // arguments
-	)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "failed to declare queue")
-		return nil, fmt.Errorf("failed to declare queue: %w", err)
-	}
-
-	// Set QoS settings for batch consumption
-	if err := c.channel.Qos(
-		prefetchCount, // prefetch count
-		0,             // prefetch size
-		false,         // global
-	); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "failed to set QoS")
-		return nil, fmt.Errorf("failed to set QoS: %w", err)
-	}
-
-	// Get messages from the queue
-	msgs, err := c.channel.Consume(
-		queueName, // queue
-		"",        // consumer
-		false,     // auto-ack
-		false,     // exclusive
-		false,     // no-local
-		false,     // no-wait
-		nil,       // args
-	)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "failed to consume from queue")
-		return nil, fmt.Errorf("failed to consume from queue: %w", err)
-	}
-
-	span.SetStatus(codes.Ok, "Consumer setup successfully")
-	return msgs, nil
-}
-
-// PopMessages consumes a batch of messages from the queue with individual acknowledgment control
-func (c *RabbitClient[T]) PopMessages(ctx context.Context, msgs <-chan amqp.Delivery, batchSize int) ([]MessageWithAck[T], error) {
-	var span trace.Span
-	ctx, span = c.tracer.Start(ctx, "rabbitmq.pop_messages")
-	defer span.End()
-
-	span.SetAttributes(attribute.Int("rabbitmq.batch.size", batchSize))
-
-	result := make([]MessageWithAck[T], 0, batchSize)
-	timeout := time.After(10 * time.Second)
-
-	// Collect messages until we reach the batch size or timeout
-	for i := 0; i < batchSize; {
-		select {
-		case msg, ok := <-msgs:
-			if !ok {
-				// Channel closed
-				span.AddEvent("Channel closed prematurely")
-				return result, nil
-			}
-
-			// Create child span for message processing
-			var msgSpan trace.Span
-			_, msgSpan = c.tracer.Start(ctx, "rabbitmq.process_message")
-			msgSpan.SetAttributes(
-				attribute.Int("rabbitmq.message.index", i),
-				attribute.Int("rabbitmq.message.size", len(msg.Body)),
-				attribute.Int64("rabbitmq.delivery.tag", int64(msg.DeliveryTag)),
-			)
-
-			var data T
-			if err := json.Unmarshal(msg.Body, &data); err != nil {
-				msgSpan.RecordError(err)
-				msgSpan.SetStatus(codes.Error, "failed to unmarshal message")
-				msgSpan.End()
-
-				// Nack the message as it's malformed but still requeue it
-				_ = msg.Nack(false, true) // always requeue, even malformed messages
-				continue
-			}
-
-			result = append(result, MessageWithAck[T]{
-				Data:        data,
-				DeliveryTag: msg.DeliveryTag,
-				Channel:     c.channel,
-			})
-
-			msgSpan.SetStatus(codes.Ok, "Message processed")
-			msgSpan.End()
-			i++
-
-		case <-ctx.Done():
-			span.RecordError(ctx.Err())
-			span.SetStatus(codes.Error, "context canceled")
-			return result, ctx.Err()
-
-		case <-timeout:
-			// We've waited long enough, return what we have
-			span.AddEvent("Timeout waiting for more messages")
-			return result, nil
-		}
-	}
-
-	span.SetStatus(codes.Ok, fmt.Sprintf("Successfully popped %d messages", len(result)))
-	return result, nil
-}
-
-// PopMessagesFromQueue is a convenience method that sets up a consumer and pops messages
+// PopMessagesFromQueue is a convenience method that retrieves messages from a queue
 func (c *RabbitClient[T]) PopMessagesFromQueue(ctx context.Context, queueName string, batchSize int) ([]MessageWithAck[T], error) {
 	var span trace.Span
 	ctx, span = c.tracer.Start(ctx, "rabbitmq.pop_messages_from_queue")
@@ -463,41 +368,155 @@ func (c *RabbitClient[T]) PopMessagesFromQueue(ctx context.Context, queueName st
 		attribute.Int("rabbitmq.batch.size", batchSize),
 	)
 
-	// Setup consumer
-	msgs, err := c.SetupConsumer(ctx, queueName, batchSize)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "failed to setup consumer")
-		return nil, fmt.Errorf("failed to setup consumer: %w", err)
+	requestID := "unknown"
+	if ctx.Value("request_id") != nil {
+		requestID = fmt.Sprintf("%v", ctx.Value("request_id"))
 	}
 
-	// Pop messages
-	result, err := c.PopMessages(ctx, msgs, batchSize)
-	if err != nil {
+	log.Printf("DIAG[%s]: Popping messages from queue %s with batch size %d", requestID, queueName, batchSize)
+	log.Printf("DIAG[%s]: Connection state before pop - closed: %v", requestID, c.conn.IsClosed())
+	log.Printf("DIAG[%s]: Channel state before pop - closed: %v", requestID, c.channel.IsClosed())
+
+	if c.conn.IsClosed() || c.channel.IsClosed() {
+		err := fmt.Errorf("cannot pop messages: connection or channel is closed")
+		log.Printf("DIAG[%s]: %v", requestID, err)
 		span.RecordError(err)
-		span.SetStatus(codes.Error, "failed to pop messages")
-		return nil, fmt.Errorf("failed to pop messages: %w", err)
+		span.SetStatus(codes.Error, "connection or channel is closed")
+		return nil, err
 	}
 
-	span.SetStatus(codes.Ok, fmt.Sprintf("Successfully popped %d messages from queue", len(result)))
+	// Get queue statistics to check message count before consuming
+	queue, err := c.channel.QueueInspect(queueName)
+	if err != nil {
+		log.Printf("DIAG[%s]: Error inspecting queue %s: %v", requestID, queueName, err)
+	} else {
+		log.Printf("DIAG[%s]: Queue %s has %d messages and %d consumers before consumption",
+			requestID, queueName, queue.Messages, queue.Consumers)
+	}
+
+	// Setup for direct message retrieval
+	log.Printf("DIAG[%s]: Setting up consumer for queue %s", requestID, queueName)
+
+	// Ensure the queue exists
+	_, err = c.channel.QueueDeclare(
+		queueName, // name
+		true,      // durable
+		false,     // delete when unused
+		false,     // exclusive
+		false,     // no-wait
+		nil,       // arguments
+	)
+
+	if err != nil {
+		log.Printf("DIAG[%s]: Failed to declare queue %s: %v", requestID, queueName, err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to declare queue")
+		return nil, fmt.Errorf("failed to declare queue: %w", err)
+	}
+
+	log.Printf("DIAG[%s]: Queue %s declared successfully", requestID, queueName)
+
+	// Set QoS settings for batch consumption
+	log.Printf("DIAG[%s]: Setting QoS with prefetch count %d", requestID, batchSize)
+	if err := c.channel.Qos(
+		batchSize, // prefetch count
+		0,         // prefetch size
+		false,     // global
+	); err != nil {
+		log.Printf("DIAG[%s]: Failed to set QoS: %v", requestID, err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to set QoS")
+		return nil, fmt.Errorf("failed to set QoS: %w", err)
+	}
+
+	log.Printf("DIAG[%s]: QoS set successfully", requestID)
+
+	// Use Get method instead of Consume for non-blocking behavior
+	log.Printf("DIAG[%s]: Using Get method to retrieve messages from queue %s", requestID, queueName)
+
+	result := make([]MessageWithAck[T], 0, batchSize)
+
+	// Try to get up to batchSize messages from the queue
+	for i := 0; i < batchSize; i++ {
+		delivery, ok, err := c.channel.Get(queueName, false) // false = no auto-ack
+		if err != nil {
+			log.Printf("DIAG[%s]: Error getting message from queue %s: %v", requestID, queueName, err)
+			break
+		}
+
+		if !ok {
+			log.Printf("DIAG[%s]: No more messages available in queue %s after retrieving %d",
+				requestID, queueName, len(result))
+			break
+		}
+
+		// Log message properties
+		log.Printf("DIAG[%s]: Retrieved message from queue %s: tag=%d, content-type=%s, length=%d",
+			requestID, queueName, delivery.DeliveryTag, delivery.ContentType, len(delivery.Body))
+
+		// Attempt to unmarshal message
+		var data T
+		if err := json.Unmarshal(delivery.Body, &data); err != nil {
+			log.Printf("DIAG[%s]: Failed to unmarshal message body: %v", requestID, err)
+			log.Printf("DIAG[%s]: Raw message content: %s", requestID, string(delivery.Body[:min(len(delivery.Body), 500)]))
+
+			// Nack the message to requeue it, or consider moving to a dead-letter queue
+			if err := delivery.Nack(false, true); err != nil {
+				log.Printf("DIAG[%s]: Failed to nack message: %v", requestID, err)
+			}
+			continue
+		}
+
+		// Add the message to our result set
+		result = append(result, MessageWithAck[T]{
+			Data:        data,
+			DeliveryTag: delivery.DeliveryTag,
+			Channel:     c.channel,
+		})
+	}
+
+	log.Printf("DIAG[%s]: Successfully collected %d messages from queue %s", requestID, len(result), queueName)
+	span.SetStatus(codes.Ok, fmt.Sprintf("Successfully popped %d messages", len(result)))
 	return result, nil
 }
 
-// AckByDeliveryTag acknowledges a message with the given delivery tag
-func (c *RabbitClient[T]) AckByDeliveryTag(ctx context.Context, deliveryTag uint64) error {
+// AckByDeliveryTag acknowledges a message by its delivery tag
+func (c *RabbitClient[T]) AckByDeliveryTag(ctx context.Context, tag uint64) error {
 	var span trace.Span
 	ctx, span = c.tracer.Start(ctx, "rabbitmq.ack_by_delivery_tag")
 	defer span.End()
 
-	span.SetAttributes(attribute.Int64("rabbitmq.delivery.tag", int64(deliveryTag)))
+	span.SetAttributes(
+		attribute.Int64("rabbitmq.delivery_tag", int64(tag)),
+	)
 
-	if err := c.channel.Ack(deliveryTag, false); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "failed to acknowledge message")
-		return fmt.Errorf("failed to acknowledge message with tag %d: %w", deliveryTag, err)
+	requestID := "unknown"
+	if ctx.Value("request_id") != nil {
+		requestID = fmt.Sprintf("%v", ctx.Value("request_id"))
 	}
 
-	span.SetStatus(codes.Ok, "Message acknowledged successfully")
+	log.Printf("DIAG[%s]: Acknowledging message with delivery tag %d", requestID, tag)
+	log.Printf("DIAG[%s]: Connection state before ack - closed: %v", requestID, c.conn.IsClosed())
+	log.Printf("DIAG[%s]: Channel state before ack - closed: %v", requestID, c.channel.IsClosed())
+
+	if c.conn.IsClosed() || c.channel.IsClosed() {
+		err := fmt.Errorf("cannot acknowledge: connection or channel is closed")
+		log.Printf("DIAG[%s]: %v", requestID, err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "connection or channel is closed")
+		return err
+	}
+
+	err := c.channel.Ack(tag, false) // false means don't acknowledge multiple messages
+	if err != nil {
+		log.Printf("DIAG[%s]: Failed to acknowledge message: %v", requestID, err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to acknowledge message")
+		return fmt.Errorf("failed to acknowledge message: %w", err)
+	}
+
+	log.Printf("DIAG[%s]: Successfully acknowledged message with delivery tag %d", requestID, tag)
+	span.SetStatus(codes.Ok, "Message acknowledged")
 	return nil
 }
 
@@ -506,22 +525,50 @@ func (c *RabbitClient[T]) Close(ctx context.Context) error {
 	ctx, span := c.tracer.Start(ctx, "rabbitmq.close")
 	defer span.End()
 
+	log.Printf("DIAG: Closing RabbitMQ connection and channel")
+
 	if c.channel != nil {
-		if err := c.channel.Close(); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "failed to close channel")
-			return fmt.Errorf("failed to close channel: %w", err)
+		log.Printf("DIAG: Closing channel (channel closed: %v)", c.channel.IsClosed())
+		if !c.channel.IsClosed() {
+			if err := c.channel.Close(); err != nil {
+				log.Printf("DIAG: Error closing channel: %v", err)
+				span.RecordError(err)
+				span.SetStatus(codes.Error, "failed to close channel")
+				return fmt.Errorf("failed to close channel: %w", err)
+			}
+			log.Printf("DIAG: Channel closed successfully")
+		} else {
+			log.Printf("DIAG: Channel was already closed")
 		}
+	} else {
+		log.Printf("DIAG: No channel to close")
 	}
 
 	if c.conn != nil {
-		if err := c.conn.Close(); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "failed to close connection")
-			return fmt.Errorf("failed to close connection: %w", err)
+		log.Printf("DIAG: Closing connection (connection closed: %v)", c.conn.IsClosed())
+		if !c.conn.IsClosed() {
+			if err := c.conn.Close(); err != nil {
+				log.Printf("DIAG: Error closing connection: %v", err)
+				span.RecordError(err)
+				span.SetStatus(codes.Error, "failed to close connection")
+				return fmt.Errorf("failed to close connection: %w", err)
+			}
+			log.Printf("DIAG: Connection closed successfully")
+		} else {
+			log.Printf("DIAG: Connection was already closed")
 		}
+	} else {
+		log.Printf("DIAG: No connection to close")
 	}
 
 	span.SetStatus(codes.Ok, "RabbitMQ connection closed successfully")
 	return nil
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

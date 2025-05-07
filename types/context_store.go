@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -14,10 +15,13 @@ import (
 type ContextStore interface {
 	SaveVocabulary(vocabulary []string) []string
 	SaveSubphrases(subphrases [][]string) [][]string
+	SaveOrthos(orthos []Ortho) error // Add this method
 	GetVocabulary() []string
 	GetSubphrases() [][]string
 	GetVersion() (int, error) // Modified to return error
 	SetVersion(version int) error
+	GetOrthoCount() (int, error)
+	GetOrthoCountByShapePosition() (map[string]map[string]int, error)
 	Close() error
 }
 
@@ -92,6 +96,8 @@ func NewLibSQLContextStore(connURL string) (*LibSQLContextStore, error) {
 
 // initSchema creates the necessary tables if they don't exist
 func (ls *LibSQLContextStore) initSchema() error {
+	fmt.Println("Starting schema initialization...")
+
 	// Create vocabulary table
 	_, err := ls.db.Exec(`
 		CREATE TABLE IF NOT EXISTS vocabulary (
@@ -101,6 +107,7 @@ func (ls *LibSQLContextStore) initSchema() error {
 	if err != nil {
 		return fmt.Errorf("error creating vocabulary table: %w", err)
 	}
+	fmt.Println("Vocabulary table created or already exists")
 
 	// Create subphrases table
 	_, err = ls.db.Exec(`
@@ -111,6 +118,7 @@ func (ls *LibSQLContextStore) initSchema() error {
 	if err != nil {
 		return fmt.Errorf("error creating subphrases table: %w", err)
 	}
+	fmt.Println("Subphrases table created or already exists")
 
 	// Create orthos table
 	_, err = ls.db.Exec(`
@@ -125,6 +133,7 @@ func (ls *LibSQLContextStore) initSchema() error {
 	if err != nil {
 		return fmt.Errorf("error creating orthos table: %w", err)
 	}
+	fmt.Println("Orthos table created or already exists")
 
 	// Create remediations table
 	_, err = ls.db.Exec(`
@@ -138,6 +147,7 @@ func (ls *LibSQLContextStore) initSchema() error {
 	if err != nil {
 		return fmt.Errorf("error creating remediations table: %w", err)
 	}
+	fmt.Println("Remediations table created or already exists")
 
 	// Create version table
 	_, err = ls.db.Exec(`
@@ -149,6 +159,7 @@ func (ls *LibSQLContextStore) initSchema() error {
 	if err != nil {
 		return fmt.Errorf("error creating version table: %w", err)
 	}
+	fmt.Println("Version table created or already exists")
 
 	// Initialize version if not exists
 	_, err = ls.db.Exec(`
@@ -157,7 +168,24 @@ func (ls *LibSQLContextStore) initSchema() error {
 	if err != nil {
 		return fmt.Errorf("error initializing version: %w", err)
 	}
+	fmt.Println("Version initialized if needed")
 
+	// Verify tables exist
+	tables := []string{"vocabulary", "subphrases", "orthos", "remediations", "version"}
+	for _, table := range tables {
+		var count int
+		err = ls.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&count)
+		if err != nil {
+			return fmt.Errorf("error verifying table %s: %w", table, err)
+		}
+
+		if count == 0 {
+			return fmt.Errorf("table %s was not created properly", table)
+		}
+		fmt.Printf("Verified table %s exists\n", table)
+	}
+
+	fmt.Println("Schema initialization completed successfully")
 	return nil
 }
 
@@ -357,6 +385,104 @@ func (ls *LibSQLContextStore) SetVersion(version int) error {
 	if err != nil {
 		return fmt.Errorf("error updating version: %w", err)
 	}
+	return nil
+}
+
+// GetOrthoCount returns the total count of orthos in the database
+func (ls *LibSQLContextStore) GetOrthoCount() (int, error) {
+	var count int
+	err := ls.db.QueryRow("SELECT COUNT(*) FROM orthos").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("error counting orthos: %w", err)
+	}
+	return count, nil
+}
+
+// GetOrthoCountByShapePosition returns the count of orthos grouped by shape and position
+func (ls *LibSQLContextStore) GetOrthoCountByShapePosition() (map[string]map[string]int, error) {
+	rows, err := ls.db.Query("SELECT shape, position, COUNT(*) FROM orthos GROUP BY shape, position")
+	if err != nil {
+		return nil, fmt.Errorf("error querying orthos by shape and position: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]map[string]int)
+	for rows.Next() {
+		var shape, position string
+		var count int
+		if err := rows.Scan(&shape, &position, &count); err != nil {
+			return nil, fmt.Errorf("error scanning ortho count row: %w", err)
+		}
+
+		if _, ok := result[shape]; !ok {
+			result[shape] = make(map[string]int)
+		}
+		result[shape][position] = count
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating ortho count rows: %w", err)
+	}
+
+	return result, nil
+}
+
+// SaveOrthos saves orthos to the database
+func (ls *LibSQLContextStore) SaveOrthos(orthos []Ortho) error {
+	tx, err := ls.db.Begin()
+	if err != nil {
+		return fmt.Errorf("error starting transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	stmt, err := tx.Prepare(`
+		INSERT OR IGNORE INTO orthos (id, grid, shape, position, shell)
+		VALUES (?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("error preparing statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, ortho := range orthos {
+		// Serialize the grid map to JSON
+		gridJSON, err := json.Marshal(ortho.Grid)
+		if err != nil {
+			return fmt.Errorf("error marshaling grid to JSON: %w", err)
+		}
+
+		// Serialize the shape and position slices to JSON
+		shapeJSON, err := json.Marshal(ortho.Shape)
+		if err != nil {
+			return fmt.Errorf("error marshaling shape to JSON: %w", err)
+		}
+
+		positionJSON, err := json.Marshal(ortho.Position)
+		if err != nil {
+			return fmt.Errorf("error marshaling position to JSON: %w", err)
+		}
+
+		_, err = stmt.Exec(
+			ortho.ID,
+			string(gridJSON),
+			string(shapeJSON),
+			string(positionJSON),
+			ortho.Shell,
+		)
+		if err != nil {
+			return fmt.Errorf("error inserting ortho: %w", err)
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("error committing transaction: %w", err)
+	}
+
 	return nil
 }
 

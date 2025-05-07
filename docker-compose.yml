@@ -6,14 +6,6 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      remediations:
-        condition: service_healthy
-      context:
-        condition: service_healthy
-      orthos:
-        condition: service_healthy
-      workserver:
-        condition: service_healthy
       jaeger:
         condition: service_started
       otel-collector:
@@ -34,173 +26,34 @@ services:
       - REPOSITORY_SERVICE_NAME=repository
       - REPOSITORY_CONTEXT_SERVICE_URL=http://context:8081
       - REPOSITORY_PORT=8080
-      - REPOSITORY_REMEDIATIONS_SERVICE_URL=http://remediations:8082
-      - REPOSITORY_ORTHOS_SERVICE_URL=http://orthos:8083
-      - REPOSITORY_WORK_SERVER_URL=http://workserver:8084
       - REPOSITORY_JAEGER_ENDPOINT=jaeger:4317
       - REPOSITORY_METRICS_ENDPOINT=otel-collector:4317
       - REPOSITORY_PYROSCOPE_ENDPOINT=http://pyroscope:4040
       - REPOSITORY_HOST=0.0.0.0
-      - "REPOSITORY_CONTEXT_DB_ENDPOINT=:memory:"
+      - REPOSITORY_CONTEXT_DB_ENDPOINT=file:/data/crochet.db?mode=memory&cache=shared
       - REPOSITORY_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - REPOSITORY_DB_QUEUE_NAME=db-queue
       - REPOSITORY_WORK_QUEUE_NAME=work-queue
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-  
-  context:
-    build:
-      context: .
-      dockerfile: ./context/Dockerfile
-    ports:
-      - "8081:8081"
-    networks:
-      - app-network
-    depends_on:
-      - jaeger
-      - otel-collector
-      - pyroscope
-    healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "Accept: application/json", "http://localhost:8081/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 30s
-    environment:
-      - CONTEXT_SERVICE_NAME=context
-      - CONTEXT_PORT=8081
-      - CONTEXT_HOST=0.0.0.0
-      - CONTEXT_JAEGER_ENDPOINT=jaeger:4317
-      - CONTEXT_METRICS_ENDPOINT=otel-collector:4317
-      - CONTEXT_PYROSCOPE_ENDPOINT=http://pyroscope:4040
-      # Database configuration options:
-      # 1. In-memory database (no persistence)
-      - "CONTEXT_LIBSQL_ENDPOINT=:memory:"
-      
-      # 2. Local SQLite file (persistence with Docker volume)
-      # - "CONTEXT_LIBSQL_ENDPOINT=/data/context.db"
-      
-      # 3. Embedded replica with sync to remote Turso database
-      # - "CONTEXT_LIBSQL_ENDPOINT=/data/context.db|https://your-db-url.turso.io|your-auth-token"
-      
-      # 4. Embedded replica with sync to remote database (no auth)
-      # - "CONTEXT_LIBSQL_ENDPOINT=/data/context.db|https://your-db-url.turso.io|none"
+      - REMEDIATIONS_SERVICE_URL=http://context:8081/remediations
+      - REPOSITORY_ORTHOS_SERVICE_URL=http://context:8081/orthos
+      - REPOSITORY_WORK_SERVER_URL=http://repository:8080/work
     volumes:
-      - context-data:/data  # For persistent storage
+      - context-data:/data
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-  
-  remediations:
-    build:
-      context: .
-      dockerfile: ./remediations/Dockerfile
-    ports:
-      - "8082:8082"
-    networks:
-      - app-network
-    depends_on:
-      - jaeger
-      - otel-collector
-      - pyroscope
-    healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "Accept: application/json", "http://localhost:8082/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 30s
-    environment:
-      - REMEDIATIONS_SERVICE_NAME=remediations
-      - REMEDIATIONS_PORT=8082
-      - REMEDIATIONS_HOST=0.0.0.0
-      - REMEDIATIONS_JAEGER_ENDPOINT=jaeger:4317
-      - REMEDIATIONS_METRICS_ENDPOINT=otel-collector:4317
-      - REMEDIATIONS_PYROSCOPE_ENDPOINT=http://pyroscope:4040
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  orthos:
-    build:
-      context: .
-      dockerfile: ./orthos/Dockerfile
-    ports:
-      - "8083:8083"
-    networks:
-      - app-network
-    depends_on:
-      - jaeger
-      - otel-collector
-      - pyroscope
-    healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "Accept: application/json", "http://localhost:8083/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 30s
-    environment:
-      - ORTHOS_SERVICE_NAME=orthos
-      - ORTHOS_PORT=8083
-      - ORTHOS_HOST=0.0.0.0
-      - ORTHOS_JAEGER_ENDPOINT=jaeger:4317
-      - ORTHOS_METRICS_ENDPOINT=otel-collector:4317
-      - ORTHOS_PYROSCOPE_ENDPOINT=http://pyroscope:4040
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-  
-  workserver:
-    build:
-      context: .
-      dockerfile: ./workserver/Dockerfile
-    ports:
-      - "8084:8084"
-    networks:
-      - app-network
-    depends_on:
-      - jaeger
-      - otel-collector
-      - pyroscope
-      - orthos
-    healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "Accept: application/json", "http://localhost:8084/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 30s
-    environment:
-      - WORKSERVER_SERVICE_NAME=workserver
-      - WORKSERVER_PORT=8084
-      - WORKSERVER_HOST=0.0.0.0
-      - WORKSERVER_JAEGER_ENDPOINT=jaeger:4317
-      - WORKSERVER_METRICS_ENDPOINT=otel-collector:4317
-      - WORKSERVER_PYROSCOPE_ENDPOINT=http://pyroscope:4040
-      - WORKSERVER_REQUEUE_TIMEOUT_SECONDS=300
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   search:
     build:
       context: .
       dockerfile: ./search/Dockerfile
-    deploy:
-      replicas: 5
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
+    # deploy:
+    #   replicas: 5
+    #   resources:
+    #     limits:
+    #       cpus: '0.5'
+    #       memory: 512M
     ports:
       - "8085"  # Only specify container port to allow Docker to allocate ports dynamically
     networks:
@@ -209,10 +62,6 @@ services:
       - jaeger
       - otel-collector
       - pyroscope
-      - orthos
-      - remediations
-      - context
-      - workserver
     healthcheck:
       test: ["CMD", "curl", "-f", "-H", "Accept: application/json", "http://localhost:8085/health"]
       interval: 5s
@@ -226,16 +75,14 @@ services:
       - SEARCH_JAEGER_ENDPOINT=jaeger:4317
       - SEARCH_METRICS_ENDPOINT=otel-collector:4317
       - SEARCH_PYROSCOPE_ENDPOINT=http://pyroscope:4040
-      - SEARCH_ORTHOS_SERVICE_URL=http://orthos:8083
-      - SEARCH_REMEDIATIONS_SERVICE_URL=http://remediations:8082
       - SEARCH_CONTEXT_SERVICE_URL=http://context:8081
-      - SEARCH_WORK_SERVER_URL=http://workserver:8084
+      - REPOSITORY_SERVICE_URL=http://repository:8080
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
+  
   feeder:
     build:
       context: .
@@ -244,14 +91,6 @@ services:
       - app-network
     depends_on:
       rabbitmq:
-        condition: service_healthy
-      workserver:
-        condition: service_healthy
-      orthos:
-        condition: service_healthy
-      remediations:
-        condition: service_healthy
-      context:
         condition: service_healthy
       repository:
         condition: service_healthy
@@ -264,13 +103,12 @@ services:
       - FEEDER_BATCH_SIZE=10
       - FEEDER_PROCESSING_TIMEOUT=30s
       - FEEDER_CONTEXT_SERVICE_URL=http://context:8081
-      - FEEDER_REMEDIATIONS_SERVICE_URL=http://remediations:8082
-      - FEEDER_ORTHOS_SERVICE_URL=http://orthos:8083
-      - FEEDER_WORK_SERVER_URL=http://workserver:8084
       - FEEDER_JAEGER_ENDPOINT=jaeger:4317
       - FEEDER_METRICS_ENDPOINT=otel-collector:4317
       - FEEDER_PYROSCOPE_ENDPOINT=http://pyroscope:4040
-      - "FEEDER_CONTEXT_DB_ENDPOINT=:memory:"
+      - FEEDER_CONTEXT_DB_ENDPOINT=file:/data/crochet.db?mode=memory&cache=shared
+    volumes:
+      - context-data:/data
     logging:
       driver: "json-file"
       options:
@@ -312,7 +150,7 @@ services:
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     restart: always
-
+  
   pyroscope:
     image: pyroscope/pyroscope:latest
     ports:
@@ -349,7 +187,7 @@ services:
     networks:
       - app-network
     restart: always
-
+  
   prometheus:
     image: prom/prometheus:latest
     volumes:
@@ -364,7 +202,7 @@ services:
     networks:
       - app-network
     restart: always
-
+  
   grafana:
     image: grafana/grafana:latest
     ports:

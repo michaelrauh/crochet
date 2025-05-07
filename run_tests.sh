@@ -11,24 +11,6 @@ cd repository
 go test -tags=test -v ./...
 cd ..
 
-# Run unit tests for the remediations service
-echo "Running unit tests for remediations service..."
-cd remediations
-go test -tags=test -v ./...
-cd ..
-
-# Run unit tests for the orthos service
-echo "Running unit tests for orthos service..."
-cd orthos
-go test -tags=test -v ./...
-cd ..
-
-# Run unit tests for the workserver service
-echo "Running unit tests for workserver service..."
-cd workserver
-go test -tags=test -v ./...
-cd ..
-
 # Run unit tests for the search service
 echo "Running unit tests for search service..."
 cd search
@@ -45,5 +27,8 @@ cd ..
 
 # Run end-to-end test for the repository service
 echo "Running end-to-end tests for repository service..."
-bash test_e2e.sh
+docker compose up -d --build
+cd test_e2e
+go run .
+cd ..
 echo "End-to-end tests completed successfully"

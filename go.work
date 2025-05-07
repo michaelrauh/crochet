@@ -4,17 +4,14 @@ use (
 	.
 	./clients
 	./config
-	./context
 	./feeder
 	./health
 	./httpclient
 	./middleware
-	./orthos
-	./remediations
 	./repository
 	./search
 	./telemetry
+	./test_e2e
 	./text
 	./types
-	./workserver
 )

@@ -1,10 +1,9 @@
 package main
 
 import (
+	"crochet/types"
 	"fmt"
 	"time"
-
-	"crochet/types"
 
 	"github.com/dgraph-io/ristretto"
 )
@@ -28,12 +27,10 @@ func NewRistrettoOrthosCache() (*RistrettoOrthosCache, error) {
 		BufferItems: 64,
 		Metrics:     true,
 	}
-
 	cache, err := ristretto.NewCache(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize orthos cache: %w", err)
 	}
-
 	return &RistrettoOrthosCache{
 		cache: cache,
 	}, nil
@@ -42,7 +39,6 @@ func NewRistrettoOrthosCache() (*RistrettoOrthosCache, error) {
 // FilterNewOrthos filters out orthos that are already in the cache
 func (c *RistrettoOrthosCache) FilterNewOrthos(orthos []types.Ortho) []types.Ortho {
 	newOrthos := make([]types.Ortho, 0)
-
 	for _, ortho := range orthos {
 		if _, found := c.cache.Get(ortho.ID); !found {
 			newOrthos = append(newOrthos, ortho)
@@ -50,6 +46,5 @@ func (c *RistrettoOrthosCache) FilterNewOrthos(orthos []types.Ortho) []types.Ort
 		}
 	}
 	c.cache.Wait()
-
 	return newOrthos
 }

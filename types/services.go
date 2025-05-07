@@ -121,7 +121,7 @@ type RabbitMQService interface {
 // RepositoryService defines the interface for interacting with the repository service
 // This implements the worker_process.md design where the Worker interfaces with a single Repository service
 type RepositoryService interface {
-	GetWork(ctx context.Context) (*WorkItem, error)
-	GetContext(ctx context.Context) (*ContextDataResponse, error)
-	PostResults(ctx context.Context, orthos []Ortho, remediations []RemediationTuple) (*ResultsResponse, error)
+	GetWork(ctx context.Context) (WorkResponse, error)
+	GetContext(ctx context.Context) (ContextDataResponse, error)
+	PostResults(ctx context.Context, orthos []Ortho, remediations []RemediationTuple, receipt string) (*ResultsResponse, error)
 }

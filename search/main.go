@@ -74,6 +74,7 @@ func ProcessWorkItem(
 	ctx context.Context,
 	repositoryService types.RepositoryService,
 	ortho types.Ortho,
+	receipt string,
 ) {
 	// Create a span for the entire work item processing
 	tracer := otel.Tracer("search-worker")
@@ -89,6 +90,21 @@ func ProcessWorkItem(
 	)
 
 	log.Printf("Processing work for ortho ID: %s", ortho.ID)
+
+	// Additional debug logging for ortho details
+	log.Printf("DEBUG: Ortho details - Shape: %v, Position: %v, Shell: %d, Grid size: %d",
+		ortho.Shape, ortho.Position, ortho.Shell, len(ortho.Grid))
+
+	// Print first few grid entries to understand what's in there
+	i := 0
+	for k, v := range ortho.Grid {
+		if i < 5 { // Limit to first 5 entries to avoid excessive logging
+			log.Printf("DEBUG: Grid entry %d - Position: %s, Value: %s", i, k, v)
+			i++
+		} else {
+			break
+		}
+	}
 
 	// Use the string representation of the shape array as the shape label for metrics, to match other services
 	shapeStr := fmt.Sprintf("%v", ortho.Shape)
@@ -113,6 +129,20 @@ func ProcessWorkItem(
 	// Get forbidden and required values directly - no conversion needed
 	forbidden, required := GetRequirements(ortho)
 
+	// Log forbidden and required values
+	log.Printf("DEBUG: Ortho requirements - Forbidden count: %d, Required paths: %d",
+		len(forbidden), len(required))
+	if len(forbidden) > 0 {
+		log.Printf("DEBUG: First few forbidden values: %v", forbidden[:min(5, len(forbidden))])
+	}
+	for i, req := range required {
+		if i < 3 { // Limit to first 3 required paths
+			log.Printf("DEBUG: Required path %d: %v", i, req)
+		} else {
+			break
+		}
+	}
+
 	// Convert forbidden to a map for filtering
 	forbiddenMap := make(map[string]struct{})
 	for _, word := range forbidden {
@@ -122,11 +152,60 @@ func ProcessWorkItem(
 	// Filter the vocabulary to exclude forbidden words
 	workingVocabulary := FilterVocabulary(searchState.Vocabulary, forbiddenMap)
 
+	// Enhanced logging about vocabulary filtering
+	log.Printf("DEBUG: Vocabulary filtering - Total vocab: %d, After filtering: %d",
+		len(searchState.Vocabulary), len(workingVocabulary))
+	if len(workingVocabulary) > 0 {
+		sampleSize := min(5, len(workingVocabulary))
+		log.Printf("DEBUG: Sample of filtered vocabulary: %v", workingVocabulary[:sampleSize])
+	} else {
+		log.Printf("WARNING: No working vocabulary after filtering - all words were forbidden!")
+	}
+
+	// Debug logging for searchState.Pairs
+	log.Printf("DEBUG: Search state pairs: %d entries", len(searchState.Pairs))
+	debugCount := 0
+	for word := range searchState.Pairs {
+		if debugCount < 5 {
+			log.Printf("DEBUG: Pair entry: word=%s", word)
+			debugCount++
+		} else {
+			break
+		}
+	}
+
 	// Generate candidates and remediations
 	candidates, remediations := GenerateCandidatesAndRemediations(workingVocabulary, required, searchState.Pairs, ortho)
 
+	// Log candidates and remediations
+	log.Printf("DEBUG: Generated %d candidates and %d remediations", len(candidates), len(remediations))
+	if len(candidates) > 0 {
+		log.Printf("DEBUG: First few candidates: %v", candidates[:min(5, len(candidates))])
+	} else {
+		log.Printf("INFO: No candidates were generated for this ortho")
+	}
+
+	if len(remediations) > 0 {
+		log.Printf("DEBUG: First few remediations: %v", remediations[:min(3, len(remediations))])
+	}
+
 	// Generate new orthos from candidates
 	newOrthos := GenerateNewOrthos(candidates, ortho)
+
+	// Log new orthos
+	log.Printf("DEBUG: Generated %d new orthos from candidates", len(newOrthos))
+	if len(newOrthos) > 0 {
+		for i, o := range newOrthos {
+			if i < 3 { // Limit to first 3 new orthos
+				log.Printf("DEBUG: New ortho %d - ID: %s, Shape: %v, Position: %v, Shell: %d",
+					i, o.ID, o.Shape, o.Position, o.Shell)
+			} else {
+				break
+			}
+		}
+	} else {
+		log.Printf("INFO: No new orthos were generated from the candidates")
+	}
 
 	// Create a span for the results posting operation
 	ctx, resultsSpan := tracer.Start(ctx, "post_results")
@@ -175,7 +254,10 @@ func ProcessWorkItem(
 	}
 
 	// Post results (both orthos and remediations) to the repository
-	resultsResponse, err := repositoryService.PostResults(ctx, newOrthos, remediations)
+	log.Printf("INFO: Posting results to repository - %d orthos, %d remediations",
+		len(newOrthos), len(remediations))
+
+	resultsResponse, err := repositoryService.PostResults(ctx, newOrthos, remediations, receipt)
 	if err != nil {
 		resultsSpan.RecordError(err)
 		resultsSpan.End()
@@ -222,7 +304,52 @@ func ProcessWorkItem(
 		attribute.String("shape", shapeStr),
 	))
 
-	log.Printf("Recorded processing time for ortho shape %s: %.3f seconds", shapeStr, processingTime)
+	log.Printf("Processed ortho shape %s in %.3f seconds - generated %d candidates, %d remediations, %d new orthos",
+		shapeStr, processingTime, len(candidates), len(remediations), len(newOrthos))
+}
+
+// min is a helper function to find the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// UpdateContextDataWithRetry fetches the latest context data from repository service with retries
+func UpdateContextDataWithRetry(ctx context.Context, repositoryService types.RepositoryService, maxRetries int) error {
+	var lastErr error
+	// Start with 1 second delay, then exponential backoff
+	retryDelay := 1 * time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		err := UpdateContextData(ctx, repositoryService)
+		if err == nil {
+			// Success!
+			if i > 0 {
+				log.Printf("Successfully initialized context data after %d retries", i)
+			}
+			return nil
+		}
+
+		lastErr = err
+		log.Printf("Failed to initialize context data (attempt %d/%d): %v", i+1, maxRetries, err)
+
+		// Sleep before retrying
+		log.Printf("Retrying in %v...", retryDelay)
+		time.Sleep(retryDelay)
+
+		// Exponential backoff with jitter
+		jitter := time.Duration(rand.Intn(500)) * time.Millisecond
+		retryDelay = retryDelay*2 + jitter
+
+		// Cap the retry delay at 30 seconds
+		if retryDelay > 30*time.Second {
+			retryDelay = 30*time.Second + jitter
+		}
+	}
+
+	return fmt.Errorf("failed to initialize context after %d attempts: %w", maxRetries, lastErr)
 }
 
 // UpdateContextData fetches the latest context data from repository service
@@ -266,52 +393,107 @@ func FilterVocabulary(vocabulary []string, forbidden map[string]struct{}) []stri
 	return filtered
 }
 
-// GenerateCandidatesAndRemediations generates candidates and remediations based on the vocabulary and requirements.
-func GenerateCandidatesAndRemediations(
-	workingVocabulary []string,
-	required [][]string,
-	pairs map[string]struct{},
-	top types.Ortho,
-) ([]string, []types.RemediationTuple) {
-	candidates := []string{}
-	remediations := []types.RemediationTuple{}
-	for _, word := range workingVocabulary {
-		missingRequired := FindMissingRequired(required, pairs, word)
-		if missingRequired != nil {
-			remediations = append(remediations, types.RemediationTuple{
-				Pair: append(missingRequired, word),
-			})
-		} else {
-			candidates = append(candidates, word)
-		}
-	}
-	return candidates, remediations
-}
+// GenerateCandidatesAndRemediations generates ortho candidates and remediations from the given workingVocabulary and required paths
+func GenerateCandidatesAndRemediations(workingVocabulary []string, required [][]string, pairsMap map[string]struct{}, ortho types.Ortho) ([]string, []types.RemediationTuple) {
+	// Enhanced debug logging
+	log.Printf("DEBUG: GenerateCandidatesAndRemediations called with: %d vocabulary items, %d required paths, %d pairs",
+		len(workingVocabulary), len(required), len(pairsMap))
 
-// FindMissingRequired finds the first missing required pair for a given word.
-func FindMissingRequired(required [][]string, pairs map[string]struct{}, word string) []string {
-	for _, req := range required {
-		combined := append([]string{}, req...)
-		combined = append(combined, word)
-		key := strings.Join(combined, ",")
-		if _, exists := pairs[key]; !exists {
-			return req
+	// Log sample of working vocabulary
+	if len(workingVocabulary) > 0 {
+		sampleSize := min(10, len(workingVocabulary))
+		log.Printf("DEBUG: Working vocabulary sample: %v", workingVocabulary[:sampleSize])
+	} else {
+		log.Printf("WARNING: Empty working vocabulary!")
+	}
+
+	// Log sample of required paths
+	if len(required) > 0 {
+		sampleSize := min(5, len(required))
+		log.Printf("DEBUG: Required paths sample: %v", required[:sampleSize])
+	}
+
+	// Log sample of pairs
+	pairCount := 0
+	log.Printf("DEBUG: Checking pairs map...")
+	for key := range pairsMap {
+		if pairCount < 10 {
+			log.Printf("DEBUG: Pair entry: %s", key)
+			pairCount++
+		} else {
+			break
 		}
 	}
-	return nil
+
+	// Keep track of candidates that meet all requirements
+	var candidates []string
+	// Keep track of pairs that need to be remediated
+	var remediations []types.RemediationTuple
+
+	// Process required paths
+	for _, req := range required {
+		log.Printf("DEBUG: Processing required path: %v", req)
+
+		// Skip any required paths that are too short
+		if len(req) < 2 {
+			log.Printf("DEBUG: Skipping required path that's too short: %v", req)
+			continue
+		}
+
+		// Check if this pair exists in the map
+		pairKey := strings.Join(req, ",")
+		_, exists := pairsMap[pairKey]
+
+		log.Printf("DEBUG: Checking if pair '%s' exists: %t", pairKey, exists)
+
+		if exists {
+			// This is a valid pair, add it to candidates
+			log.Printf("DEBUG: Found valid pair: %s", pairKey)
+			candidates = append(candidates, pairKey)
+		} else {
+			// This pair needs to be remediated
+			log.Printf("DEBUG: Pair not found, adding to remediations: %v", req)
+			remTuple := types.RemediationTuple{
+				Pair: req,
+			}
+			remediations = append(remediations, remTuple)
+		}
+	}
+
+	// Log the final results
+	log.Printf("DEBUG: Generated %d candidates and %d remediations", len(candidates), len(remediations))
+	return candidates, remediations
 }
 
 // GenerateNewOrthos generates new orthos from the candidates.
 func GenerateNewOrthos(candidates []string, parent types.Ortho) []types.Ortho {
 	// Create a counter for generating new orthos
 	counter := NewCounter()
-	// Generate new orthos using the Add function directly - no conversion needed
+	// Generate new orthos using the Add function directly
 	var result []types.Ortho
-	for _, word := range candidates {
-		// Generate internal orthos using Add function
-		newOrthos := Add(parent, word, counter)
-		result = append(result, newOrthos...)
+
+	// Log candidates for debugging
+	log.Printf("DEBUG: Generating orthos from %d candidates", len(candidates))
+
+	for _, candidateKey := range candidates {
+		// For debugging
+		log.Printf("DEBUG: Processing candidate: %s", candidateKey)
+
+		// Split the candidate key to get the individual words
+		words := strings.Split(candidateKey, ",")
+		if len(words) >= 2 {
+			// Use the first word as the additional word for the new ortho
+			additionalWord := words[0]
+			log.Printf("DEBUG: Adding word '%s' to parent ortho", additionalWord)
+
+			// Generate internal orthos using Add function
+			newOrthos := Add(parent, additionalWord, counter)
+			result = append(result, newOrthos...)
+		} else {
+			log.Printf("WARNING: Invalid candidate format: %s", candidateKey)
+		}
 	}
+
 	return result
 }
 
@@ -322,21 +504,22 @@ func StartWorker(
 ) {
 	// Get a separate tracer for the worker
 	tracer := otel.Tracer("search-worker")
-
 	// Get the raw worker loop context
 	workerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
 	// Initialize the context on startup with a proper span
 	initCtx, initSpan := tracer.Start(workerCtx, "initialize_context")
-	if err := UpdateContextData(initCtx, repositoryService); err != nil {
-		log.Printf("Failed to initialize context data: %v", err)
+	// Try to initialize context data with retries
+	if err := UpdateContextDataWithRetry(initCtx, repositoryService, 15); err != nil {
+		log.Printf("Failed to initialize context data after maximum retries: %v", err)
 		initSpan.RecordError(err)
 		initSpan.End()
-		return
+		// Don't return - we'll keep trying in the worker loop
+		log.Println("Continuing with worker loop despite initialization failure")
+	} else {
+		log.Println("Successfully initialized context data")
 	}
 	initSpan.End()
-
 	// Worker loop
 	for {
 		// Check if context is done (service shutting down)
@@ -347,17 +530,23 @@ func StartWorker(
 		default:
 			// Continue with the worker loop
 		}
-
+		// If we don't have context data yet, keep trying to initialize
+		if searchState == nil || len(searchState.Vocabulary) == 0 {
+			if err := UpdateContextData(workerCtx, repositoryService); err != nil {
+				log.Printf("Still unable to initialize context data: %v", err)
+				time.Sleep(5 * time.Second) // Wait before retrying
+				continue
+			}
+			log.Println("Successfully initialized context data in worker loop")
+		}
 		// Create a root span for this work cycle
 		rootCtx, rootSpan := tracer.Start(context.Background(), "worker_cycle")
 		rootSpan.SetAttributes(attribute.String("service.name", "search"))
-
 		// Add a waiting span to show we're actively polling
 		_, waitSpan := tracer.Start(rootCtx, "waiting_for_work")
-
 		// Call the repository to get a work item with a dedicated span
 		workCtx, workSpan := tracer.Start(rootCtx, "get_work_item")
-		workItem, err := repositoryService.GetWork(workCtx)
+		workResponse, err := repositoryService.GetWork(workCtx)
 		if err != nil {
 			log.Printf("Error getting work item: %v", err)
 			workSpan.RecordError(err)
@@ -368,14 +557,11 @@ func StartWorker(
 			time.Sleep(5 * time.Second) // Wait a bit before trying again
 			continue
 		}
-
 		// End the work span now
 		workSpan.End()
-
-		// Record whether we got an item
-		hasWork := workItem != nil && workItem.Data != nil
+		// Check if the Work field is nil - WorkResponse is a value type, not a pointer
+		hasWork := workResponse.Work != nil
 		rootSpan.SetAttributes(attribute.Bool("has_work", hasWork))
-
 		// If no item is available, wait and try again
 		if !hasWork {
 			log.Println("No work items available, waiting...")
@@ -386,15 +572,31 @@ func StartWorker(
 			time.Sleep(5 * time.Second)
 			continue
 		}
-
 		// We found work, end the waiting span
 		waitSpan.SetAttributes(attribute.Bool("found_work", true))
 		waitSpan.End()
 
+		// Get the receipt from the work response
+		receipt := workResponse.Receipt
+		log.Printf("Received work item with receipt: %s", receipt)
+
+		// Get the work item from the response
+		workItem := workResponse.Work
+
+		// Enhanced logging: Log detailed work information including version
+		log.Printf("WORKER RECEIVED WORK: ID=%s, Timestamp=%d, Version=%d",
+			workItem.ID, workItem.Timestamp, workResponse.Version)
+
+		// Log work data details if available
+		if workItem.Data != nil {
+			dataJSON, _ := json.Marshal(workItem.Data)
+			log.Printf("Work item data: %s", string(dataJSON))
+		}
+
 		// Convert the work item data to an Ortho
 		var ortho types.Ortho
 
-		// Convert interface{} to Ortho type
+		// First convert the work item's Data field to bytes
 		dataBytes, err := json.Marshal(workItem.Data)
 		if err != nil {
 			log.Printf("Error marshaling work item data: %v", err)
@@ -404,24 +606,62 @@ func StartWorker(
 			continue
 		}
 
-		if err := json.Unmarshal(dataBytes, &ortho); err != nil {
-			log.Printf("Error unmarshaling work item data to Ortho: %v", err)
-			rootSpan.RecordError(err)
+		// Log the raw data before unmarshaling
+		log.Printf("RAW WORK DATA: %s", string(dataBytes))
+
+		// Enhanced validation before unmarshaling
+		if len(dataBytes) <= 2 { // Empty JSON object "{}" or less
+			log.Printf("WARNING: Work item data is empty or nearly empty: '%s'", string(dataBytes))
+			rootSpan.RecordError(fmt.Errorf("empty work item data"))
 			rootSpan.End()
 			time.Sleep(1 * time.Second)
 			continue
 		}
+
+		// Check if this is a nested structure with a data field
+		var nestedStructure struct {
+			Data *types.Ortho `json:"data"`
+		}
+
+		if err := json.Unmarshal(dataBytes, &nestedStructure); err == nil && nestedStructure.Data != nil {
+			// Successfully detected and extracted the nested ortho
+			ortho = *nestedStructure.Data
+			log.Printf("Detected and extracted nested ortho structure with ID: %s", ortho.ID)
+		} else {
+			// Try direct unmarshaling as fallback (backward compatibility)
+			if err := json.Unmarshal(dataBytes, &ortho); err != nil {
+				log.Printf("Error unmarshaling work item data to Ortho: %v", err)
+				log.Printf("UNMARSHAL ERROR DETAILS: Data='%s', Error='%v'", string(dataBytes), err)
+				rootSpan.RecordError(err)
+				rootSpan.End()
+				time.Sleep(1 * time.Second)
+				continue
+			}
+		}
+
+		// Validate the unmarshaled ortho object
+		if ortho.ID == "" {
+			log.Printf("WARNING: Unmarshaled ortho has empty ID, generating a fallback ID")
+			ortho.ID = fmt.Sprintf("fallback_ortho_%d", time.Now().UnixNano())
+		}
+
+		if ortho.Grid == nil {
+			log.Printf("WARNING: Unmarshaled ortho has nil Grid, initializing empty map")
+			ortho.Grid = make(map[string]string)
+		}
+
+		log.Printf("WORKER PROCESSING ORTHO: ID=%s, Shape=%v, Position=%v, Shell=%d, GridSize=%d",
+			ortho.ID, ortho.Shape, ortho.Position, ortho.Shell, len(ortho.Grid))
 
 		// Process the work item inside a span
 		processCtx, processSpan := tracer.Start(rootCtx, "process_work_item")
 		processSpan.SetAttributes(
 			attribute.String("work_item.id", workItem.ID),
 			attribute.String("ortho.id", ortho.ID),
+			attribute.String("receipt", receipt),
 		)
-
 		// Track if we had an error during processing
 		hadProcessingError := false
-
 		// Use a panic handler to ensure trace completion
 		func() {
 			defer func() {
@@ -436,15 +676,14 @@ func StartWorker(
 				}
 				processSpan.End()
 			}()
-
 			// Process the work item
 			ProcessWorkItem(
 				processCtx,
 				repositoryService,
 				ortho,
+				receipt,
 			)
 		}()
-
 		// Add a cooldown span and delay only if there was an error during processing
 		if hadProcessingError {
 			_, cooldownSpan := tracer.Start(rootCtx, "error_cooldown")
@@ -452,7 +691,6 @@ func StartWorker(
 			time.Sleep(500 * time.Millisecond) // Cooldown after error
 			cooldownSpan.End()
 		}
-
 		// End the root span for this cycle
 		rootSpan.End()
 	}

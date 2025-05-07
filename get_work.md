@@ -1,13 +1,13 @@
 ```mermaid
 sequenceDiagram
-    participant Worker
+    participant Search
     participant Repository
     participant DB 
     participant Work Queue
  
-    Worker->>Repository: GET /Work
+    Search->>Repository: GET /Work
     Repository->>DB: Read(Version)
     Repository->>Work Queue: Pop
     Work Queue-->>Repository: (Work, Receipt)
-    Repository->>Worker: Reply (200, Version, Work, Receipt)  
-```  
+    Repository->>Search: Reply (200, Version, Work, Receipt)  
+```

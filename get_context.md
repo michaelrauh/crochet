@@ -1,10 +1,9 @@
 ```mermaid
 sequenceDiagram
-    participant Worker
+    participant Search
     participant Repository
     participant DB 
-
-    Worker->>Repository: GET /Context
+    Search->>Repository: GET /Context
     Repository->>DB: Read(Context)
-    Repository->>Worker: Reply (200, Context) 
-```   
+    Repository->>Search: Reply (200, Context) 
+```

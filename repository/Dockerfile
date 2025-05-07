@@ -1,8 +1,13 @@
-FROM golang:1.24.0 AS builder
+FROM golang:1.24-alpine AS builder
 WORKDIR /app
 
-# Install SQLite and build dependencies
-RUN apt-get update && apt-get install -y sqlite3 libsqlite3-dev
+# Install build dependencies for SQLite
+RUN apk add --no-cache \
+    gcc \
+    musl-dev \
+    pkgconf \
+    sqlite \
+    sqlite-dev
 
 # Copy all shared modules
 COPY ./telemetry ./telemetry
@@ -25,7 +30,7 @@ RUN go mod tidy
 # Copy the repository source code
 WORKDIR /app
 COPY ./repository/go.mod ./repository/
-# Copy all Go files from the repository directory instead of just main.go
+# Copy all Go files from the repository directory
 COPY ./repository/*.go ./repository/
 
 # Set up the build environment
@@ -59,14 +64,14 @@ RUN go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc
 # Add Grafana Pyroscope client dependency
 RUN go get github.com/grafana/pyroscope-go
 
+# Add Ristretto cache dependency for OrthosCache
+RUN go get github.com/dgraph-io/ristretto
+
 # Add mapstructure dependency
 RUN go get github.com/mitchellh/mapstructure
 
 # Add envconfig dependency
 RUN go get github.com/kelseyhightower/envconfig
-
-# Add Ristretto cache dependency for OrthosCache
-RUN go get github.com/dgraph-io/ristretto
 
 # Add SQLite dependency
 RUN go get github.com/mattn/go-sqlite3
@@ -75,18 +80,18 @@ RUN go mod tidy
 # Build the application with the production build tag and CGO enabled
 RUN CGO_ENABLED=1 GOOS=linux go build -tags=prod -v -o server
 
-# Use a more complete Alpine image to include necessary libraries for SQLite
-FROM alpine:3.19
+FROM alpine:latest
 
-# Install runtime dependencies for SQLite and other libraries
-RUN apk --no-cache add \
+# Install runtime dependencies for SQLite
+RUN apk add --no-cache \
     ca-certificates \
-    sqlite \
-    sqlite-libs \
-    libc6-compat \
-    gcompat
+    curl \
+    sqlite
 
 WORKDIR /root/
 COPY --from=builder /app/repository/server .
+# Make sure the server executable has proper permissions
+RUN chmod +x /root/server
+
 EXPOSE 8080
-CMD ["./server"]
+CMD ["/root/server"]

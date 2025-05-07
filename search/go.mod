@@ -6,7 +6,7 @@ require (
 	crochet/clients v0.0.0-00010101000000-000000000000
 	crochet/config v0.0.0-00010101000000-000000000000
 	crochet/health v0.0.0-00010101000000-000000000000
-	crochet/httpclient v0.0.0-00010101000000-000000000000
+	crochet/httpclient v0.0.0-00010101000000-000000000000 // indirect
 	crochet/middleware v0.0.0-00010101000000-000000000000
 	crochet/types v0.0.0-00010101000000-000000000000
 	github.com/gin-gonic/gin v1.10.0
@@ -14,7 +14,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/otel v1.35.0
 	go.opentelemetry.io/otel/metric v1.35.0
-	go.opentelemetry.io/otel/trace v1.35.0
+	go.opentelemetry.io/otel/trace v1.35.0 // indirect
 )
 
 require (

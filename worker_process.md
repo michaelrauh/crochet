@@ -1,14 +1,19 @@
 ```mermaid
 sequenceDiagram
-    participant Worker
+    participant Search
     participant Repository
 
-    Worker->>Repository: GET /Work
-    Worker->>Worker: Check Version
+    Search->>Repository: GET /Work
+    Repository-->>Search: Reply (200, Work)
+    Search->>Search: Log Work Retrieval
+    Note right of Search: Log work details including version
+    Search->>Search: Check Version
         alt Version Mismatch
-            Worker->>Repository: GET /Context
-            Repository-->>Worker: Reply (200, Context)
+            Search->>Repository: GET /Context
+            Repository-->>Search: Reply (200, Context)
+            Search->>Search: Log Context Retrieval
         end
 
-    Worker->>Repository: POST Results (Orthos, Remediations) 
-``` 
+    Search->>Repository: POST Results (Orthos, Remediations)
+    Search->>Search: Log Results Posted
+```

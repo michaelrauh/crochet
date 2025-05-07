@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"crochet/httpclient"
@@ -91,11 +92,22 @@ func NewWorkServerService(url string, pushClient *httpclient.GenericClient[types
 	}
 }
 
+// NewRabbitMQService creates a new RabbitMQ service client and declares the needed queues
 func NewRabbitMQService(url string, queueName string) (types.RabbitMQService, error) {
 	dbQueueClient, err := httpclient.NewRabbitClient[types.DBQueueItem](url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DB queue client: %w", err)
 	}
+
+	// Declare the queue at initialization time to ensure it exists
+	log.Printf("Initializing RabbitMQService and declaring queue %s", queueName)
+	err = dbQueueClient.DeclareQueue(context.Background(), queueName)
+	if err != nil {
+		// Close the client to avoid leaks
+		dbQueueClient.Close(context.Background())
+		return nil, fmt.Errorf("failed to declare queue %s: %w", queueName, err)
+	}
+	log.Printf("Queue %s declared successfully", queueName)
 
 	return &RabbitMQServiceClient{
 		URL:           url,
@@ -314,101 +326,157 @@ func (s *WorkServerServiceClient) Nack(ctx context.Context, id string) (types.Wo
 }
 
 func (s *RabbitMQServiceClient) PushContext(ctx context.Context, contextInput types.ContextInput) error {
+	log.Printf("[%s] Creating context queue item", ctx.Value("request_id"))
 	queueItem, err := types.CreateContextQueueItem(contextInput)
 	if err != nil {
+		log.Printf("[%s] Failed to create context queue item: %v", ctx.Value("request_id"), err)
 		return fmt.Errorf("failed to create context queue item: %w", err)
 	}
 
+	log.Printf("[%s] Marshaling context queue item", ctx.Value("request_id"))
 	itemJSON, err := json.Marshal(queueItem)
 	if err != nil {
+		log.Printf("[%s] Failed to marshal context queue item: %v", ctx.Value("request_id"), err)
 		return fmt.Errorf("failed to marshal context queue item: %w", err)
 	}
 
+	// Make sure the queue exists before pushing
+	log.Printf("[%s] Ensuring queue %s exists before pushing context", ctx.Value("request_id"), s.QueueName)
+	if err := s.DBQueueClient.DeclareQueue(ctx, s.QueueName); err != nil {
+		log.Printf("[%s] Failed to declare queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
+		return fmt.Errorf("failed to declare queue: %w", err)
+	}
+
+	log.Printf("[%s] Pushing context to queue %s", ctx.Value("request_id"), s.QueueName)
 	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
+		log.Printf("[%s] Failed to push context to queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
 		return fmt.Errorf("failed to push context to queue: %w", err)
 	}
 
+	log.Printf("[%s] Successfully pushed context to queue %s", ctx.Value("request_id"), s.QueueName)
 	return nil
 }
 
 func (s *RabbitMQServiceClient) PushVersion(ctx context.Context, version types.VersionInfo) error {
+	log.Printf("[%s] Creating version queue item with version %d", ctx.Value("request_id"), version.Version)
 	queueItem, err := types.CreateVersionQueueItem(version)
 	if err != nil {
+		log.Printf("[%s] Failed to create version queue item: %v", ctx.Value("request_id"), err)
 		return fmt.Errorf("failed to create version queue item: %w", err)
 	}
 
+	log.Printf("[%s] Marshaling version queue item", ctx.Value("request_id"))
 	itemJSON, err := json.Marshal(queueItem)
 	if err != nil {
+		log.Printf("[%s] Failed to marshal version queue item: %v", ctx.Value("request_id"), err)
 		return fmt.Errorf("failed to marshal version queue item: %w", err)
 	}
 
+	// Make sure the queue exists before pushing
+	log.Printf("[%s] Ensuring queue %s exists before pushing version", ctx.Value("request_id"), s.QueueName)
+	if err := s.DBQueueClient.DeclareQueue(ctx, s.QueueName); err != nil {
+		log.Printf("[%s] Failed to declare queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
+		return fmt.Errorf("failed to declare queue: %w", err)
+	}
+
+	log.Printf("[%s] Pushing version to queue %s", ctx.Value("request_id"), s.QueueName)
 	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
+		log.Printf("[%s] Failed to push version to queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
 		return fmt.Errorf("failed to push version to queue: %w", err)
 	}
 
+	log.Printf("[%s] Successfully pushed version to queue %s", ctx.Value("request_id"), s.QueueName)
 	return nil
 }
 
 func (s *RabbitMQServiceClient) PushPairs(ctx context.Context, pairs []types.Pair) error {
+	log.Printf("[%s] Creating %d pair queue items", ctx.Value("request_id"), len(pairs))
 	messages := make([][]byte, len(pairs))
 
 	for i, pair := range pairs {
 		queueItem, err := types.CreatePairQueueItem(pair)
 		if err != nil {
+			log.Printf("[%s] Failed to create pair queue item at index %d: %v", ctx.Value("request_id"), i, err)
 			return fmt.Errorf("failed to create pair queue item at index %d: %w", i, err)
 		}
 
 		messages[i], err = json.Marshal(queueItem)
 		if err != nil {
+			log.Printf("[%s] Failed to marshal pair queue item at index %d: %v", ctx.Value("request_id"), i, err)
 			return fmt.Errorf("failed to marshal pair queue item at index %d: %w", i, err)
 		}
 	}
 
+	// Make sure the queue exists before pushing
+	log.Printf("[%s] Ensuring queue %s exists before pushing pairs", ctx.Value("request_id"), s.QueueName)
+	if err := s.DBQueueClient.DeclareQueue(ctx, s.QueueName); err != nil {
+		log.Printf("[%s] Failed to declare queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
+		return fmt.Errorf("failed to declare queue: %w", err)
+	}
+
+	log.Printf("[%s] Pushing %d pairs to queue %s", ctx.Value("request_id"), len(pairs), s.QueueName)
 	if err := s.DBQueueClient.PushMessageBatch(ctx, s.QueueName, messages); err != nil {
+		log.Printf("[%s] Failed to push pairs to queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
 		return fmt.Errorf("failed to push pairs to queue: %w", err)
 	}
 
+	log.Printf("[%s] Successfully pushed %d pairs to queue %s", ctx.Value("request_id"), len(pairs), s.QueueName)
 	return nil
 }
 
 func (s *RabbitMQServiceClient) PushSeed(ctx context.Context, seed types.Ortho) error {
+	log.Printf("[%s] Creating seed ortho queue item with ID %s", ctx.Value("request_id"), seed.ID)
 	queueItem, err := types.CreateOrthoQueueItem(seed)
 	if err != nil {
+		log.Printf("[%s] Failed to create seed ortho queue item: %v", ctx.Value("request_id"), err)
 		return fmt.Errorf("failed to create ortho queue item: %w", err)
 	}
 
+	log.Printf("[%s] Marshaling seed ortho queue item", ctx.Value("request_id"))
 	itemJSON, err := json.Marshal(queueItem)
 	if err != nil {
+		log.Printf("[%s] Failed to marshal seed ortho queue item: %v", ctx.Value("request_id"), err)
 		return fmt.Errorf("failed to marshal ortho queue item: %w", err)
 	}
 
+	// Make sure the queue exists before pushing
+	log.Printf("[%s] Ensuring queue %s exists before pushing seed ortho", ctx.Value("request_id"), s.QueueName)
+	if err := s.DBQueueClient.DeclareQueue(ctx, s.QueueName); err != nil {
+		log.Printf("[%s] Failed to declare queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
+		return fmt.Errorf("failed to declare queue: %w", err)
+	}
+
+	log.Printf("[%s] Pushing seed ortho to queue %s", ctx.Value("request_id"), s.QueueName)
 	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
+		log.Printf("[%s] Failed to push seed ortho to queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
 		return fmt.Errorf("failed to push seed ortho to queue: %w", err)
 	}
 
+	log.Printf("[%s] Successfully pushed seed ortho to queue %s", ctx.Value("request_id"), s.QueueName)
 	return nil
 }
 
-func (s *RepositoryServiceClient) GetWork(ctx context.Context) (*types.WorkItem, error) {
+func (s *RepositoryServiceClient) GetWork(ctx context.Context) (types.WorkResponse, error) {
 	response, err := s.WorkClient.GenericCall(ctx, http.MethodGet, s.URL+"/work", nil)
 	if err != nil {
-		return nil, fmt.Errorf("error calling repository work endpoint: %w", err)
+		return types.WorkResponse{}, fmt.Errorf("error calling repository work endpoint: %w", err)
 	}
-	return response.Work, nil
+	return response, nil
 }
 
-func (s *RepositoryServiceClient) GetContext(ctx context.Context) (*types.ContextDataResponse, error) {
+func (s *RepositoryServiceClient) GetContext(ctx context.Context) (types.ContextDataResponse, error) {
 	response, err := s.ContextClient.GenericCall(ctx, http.MethodGet, s.URL+"/context", nil)
 	if err != nil {
-		return nil, fmt.Errorf("error calling repository context endpoint: %w", err)
+		return types.ContextDataResponse{}, fmt.Errorf("error calling repository context endpoint: %w", err)
 	}
-	return &response, nil
+	return response, nil
 }
 
-func (s *RepositoryServiceClient) PostResults(ctx context.Context, orthos []types.Ortho, remediations []types.RemediationTuple) (*types.ResultsResponse, error) {
+func (s *RepositoryServiceClient) PostResults(ctx context.Context, orthos []types.Ortho, remediations []types.RemediationTuple, receipt string) (*types.ResultsResponse, error) {
 	requestBody := types.ResultsRequest{
 		Orthos:       orthos,
 		Remediations: remediations,
+		Receipt:      receipt,
 	}
 
 	requestJSON, err := json.Marshal(requestBody)

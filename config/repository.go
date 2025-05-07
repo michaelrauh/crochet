@@ -5,7 +5,7 @@ package config
 type RepositoryConfig struct {
 	BaseConfig
 	ContextServiceURL      string `envconfig:"CONTEXT_SERVICE_URL" required:"true"`
-	RemediationsServiceURL string `envconfig:"REMEDIATIONS_SERVICE_URL" required:"true"`
+	RemediationsServiceURL string `envconfig:"REMEDIATIONS_SERVICE_URL" required:"false"` // Changed to false since remediation is now handled internally
 	OrthosServiceURL       string `envconfig:"ORTHOS_SERVICE_URL" required:"true"`
 	WorkServerURL          string `envconfig:"WORK_SERVER_URL" required:"true"`
 	ContextDBEndpoint      string `envconfig:"CONTEXT_DB_ENDPOINT" required:"true"`                      // Added for direct DB access
@@ -25,9 +25,7 @@ func (c *RepositoryConfig) Validate() error {
 	if c.ContextServiceURL == "" {
 		return NewConfigError("CONTEXT_SERVICE_URL is required")
 	}
-	if c.RemediationsServiceURL == "" {
-		return NewConfigError("REMEDIATIONS_SERVICE_URL is required")
-	}
+	// Removed validation for RemediationsServiceURL since it's handled internally now
 	if c.OrthosServiceURL == "" {
 		return NewConfigError("ORTHOS_SERVICE_URL is required")
 	}

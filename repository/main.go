@@ -64,18 +64,6 @@ func main() {
 	}
 	defer workQueueClient.Close(context.Background())
 
-	orthosClient, err := NewRabbitDBQueueClient[types.Ortho](cfg.RabbitMQURL)
-	if err != nil {
-		log.Fatalf("Failed to initialize Orthos client: %v", err)
-	}
-	defer orthosClient.Close(context.Background())
-
-	remediationsClient, err := NewRabbitDBQueueClient[types.RemediationTuple](cfg.RabbitMQURL)
-	if err != nil {
-		log.Fatalf("Failed to initialize Remediations client: %v", err)
-	}
-	defer remediationsClient.Close(context.Background())
-
 	if err := initStore(cfg); err != nil {
 		log.Fatalf("Failed to initialize context store: %v", err)
 	}
@@ -90,8 +78,6 @@ func main() {
 		orthosCache,
 		dbQueueClients.Service, // For pushing context, version, pairs, and seed
 		workQueueClient,        // For popping work and acknowledging receipts
-		orthosClient,           // For pushing new orthos to DB queue
-		remediationsClient,     // For pushing remediations to DB queue
 		cfg,
 	)
 
@@ -99,6 +85,7 @@ func main() {
 	router.POST("/results", handler.HandlePostResults)
 	router.GET("/context", handler.HandleGetContext)
 	router.GET("/work", handler.HandleGetWork)
+	router.GET("/results", handler.HandleGetResults)
 
 	healthCheck := health.New(health.Options{
 		ServiceName: cfg.ServiceName,

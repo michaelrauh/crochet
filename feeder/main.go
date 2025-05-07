@@ -47,15 +47,21 @@ func loadConfigFromEnv() (*Config, error) {
 	batchSize, err := strconv.Atoi(batchSizeStr)
 	if err != nil || batchSize <= 0 {
 		batchSize = 10 // Default batch size if not specified or invalid
+		log.Printf("Using default batch size: %d", batchSize)
+	} else {
+		log.Printf("Using configured batch size: %d", batchSize)
 	}
 
 	timeoutStr := os.Getenv("FEEDER_PROCESSING_TIMEOUT")
 	timeout, err := time.ParseDuration(timeoutStr)
 	if err != nil {
 		timeout = 30 * time.Second // Default timeout
+		log.Printf("Using default processing timeout: %s", timeout)
+	} else {
+		log.Printf("Using configured processing timeout: %s", timeout)
 	}
 
-	return &Config{
+	config := &Config{
 		ServiceName:       os.Getenv("FEEDER_SERVICE_NAME"),
 		RabbitMQURL:       os.Getenv("FEEDER_RABBITMQ_URL"),
 		DBQueueName:       os.Getenv("FEEDER_DB_QUEUE_NAME"),
@@ -70,7 +76,35 @@ func loadConfigFromEnv() (*Config, error) {
 		MetricsEndpoint:   os.Getenv("FEEDER_METRICS_ENDPOINT"),
 		PyroscopeEndpoint: os.Getenv("FEEDER_PYROSCOPE_ENDPOINT"),
 		ContextDBEndpoint: os.Getenv("FEEDER_CONTEXT_DB_ENDPOINT"),
-	}, nil
+	}
+
+	log.Printf("Feeder configuration loaded:")
+	log.Printf("- RabbitMQ URL: %s", config.RabbitMQURL)
+	log.Printf("- DB Queue Name: %s", config.DBQueueName)
+	log.Printf("- Work Queue Name: %s", config.WorkQueueName)
+	log.Printf("- Batch Size: %d", config.BatchSize)
+	log.Printf("- Processing Timeout: %s", config.ProcessingTimeout)
+	log.Printf("- Context Service URL: %s", config.ContextServiceURL)
+	log.Printf("- Context DB Endpoint: %s", config.ContextDBEndpoint)
+
+	// Validate critical configuration
+	if config.RabbitMQURL == "" {
+		return nil, fmt.Errorf("FEEDER_RABBITMQ_URL environment variable is required but not set")
+	}
+
+	if config.DBQueueName == "" {
+		return nil, fmt.Errorf("FEEDER_DB_QUEUE_NAME environment variable is required but not set")
+	}
+
+	if config.WorkQueueName == "" {
+		return nil, fmt.Errorf("FEEDER_WORK_QUEUE_NAME environment variable is required but not set")
+	}
+
+	if config.ContextDBEndpoint == "" {
+		return nil, fmt.Errorf("FEEDER_CONTEXT_DB_ENDPOINT environment variable is required but not set")
+	}
+
+	return config, nil
 }
 
 // createPairKey creates a string key from a string slice for map lookups
@@ -84,6 +118,142 @@ func createPairKey(pair []string) string {
 		result += ":" + pair[i]
 	}
 	return result
+}
+
+// initializeDBSchema initializes the database schema for a new or in-memory database
+func initializeDBSchema(db *sql.DB) error {
+	log.Printf("Initializing database schema...")
+
+	// Verify database connection
+	err := db.Ping()
+	if err != nil {
+		return fmt.Errorf("database connection failed: %v", err)
+	}
+	log.Printf("Database connection verified.")
+
+	// Run all schema creation in a transaction for atomicity
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to start schema initialization transaction: %v", err)
+	}
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Clear existing schema to avoid any issues with column mismatches
+	schemaTables := []string{"remediations", "orthos", "subphrases", "vocabulary", "version"}
+	for _, table := range schemaTables {
+		_, err = tx.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", table))
+		if err != nil {
+			return fmt.Errorf("failed to drop table %s: %v", table, err)
+		}
+		log.Printf("Dropped table %s if it existed", table)
+	}
+
+	// Create version table
+	_, err = tx.Exec(`
+		CREATE TABLE version (
+			version INTEGER NOT NULL DEFAULT 0
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create version table: %v", err)
+	}
+	log.Printf("Version table created")
+
+	// Initialize with default version
+	_, err = tx.Exec("INSERT INTO version (version) VALUES (0)")
+	if err != nil {
+		return fmt.Errorf("failed to insert initial version: %v", err)
+	}
+	log.Printf("Initialized version table with default version 0")
+
+	// Create vocabulary table
+	_, err = tx.Exec(`
+		CREATE TABLE vocabulary (
+			term TEXT PRIMARY KEY
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create vocabulary table: %v", err)
+	}
+	log.Printf("Vocabulary table created")
+
+	// Create subphrases table
+	_, err = tx.Exec(`
+		CREATE TABLE subphrases (
+			phrase TEXT PRIMARY KEY
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create subphrases table: %v", err)
+	}
+	log.Printf("Subphrases table created")
+
+	// Create orthos table
+	_, err = tx.Exec(`
+		CREATE TABLE orthos (
+			id TEXT PRIMARY KEY,
+			grid TEXT NOT NULL,
+			shape TEXT NOT NULL,
+			position TEXT NOT NULL,
+			shell INTEGER NOT NULL DEFAULT 0
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create orthos table: %v", err)
+	}
+	log.Printf("Orthos table created")
+
+	// Create remediations table
+	_, err = tx.Exec(`
+		CREATE TABLE remediations (
+			id TEXT PRIMARY KEY,
+			ortho_id TEXT NOT NULL,
+			pair_key TEXT NOT NULL,
+			FOREIGN KEY (ortho_id) REFERENCES orthos(id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create remediations table: %v", err)
+	}
+	log.Printf("Remediations table created")
+
+	// Create index on pair_key
+	_, err = tx.Exec(`
+		CREATE INDEX idx_remediations_pair_key ON remediations(pair_key)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create index on remediations table: %v", err)
+	}
+	log.Printf("Remediations index created")
+
+	// Commit the transaction
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("failed to commit schema initialization transaction: %v", err)
+	}
+	tx = nil // Set to nil to prevent rollback in defer
+
+	// Verify all tables were created properly
+	tables := []string{"version", "vocabulary", "subphrases", "orthos", "remediations"}
+	for _, table := range tables {
+		var tableExists bool
+		query := fmt.Sprintf("SELECT 1 FROM sqlite_master WHERE type='table' AND name='%s'", table)
+		err = db.QueryRow(query).Scan(&tableExists)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return fmt.Errorf("table %s was not created properly", table)
+			}
+			return fmt.Errorf("error verifying table %s: %v", table, err)
+		}
+		log.Printf("Verified table %s exists", table)
+	}
+
+	log.Printf("Database schema initialization complete")
+	return nil
 }
 
 func main() {
@@ -125,18 +295,49 @@ func main() {
 	// Initialize tracer
 	tracer := otel.Tracer("github.com/crochet/feeder")
 
+	// Create and initialize the context store with database schema
+	ctxStore, err := types.NewLibSQLContextStore(cfg.ContextDBEndpoint)
+	if err != nil {
+		log.Fatalf("Error connecting to context database: %v", err)
+	}
+	defer ctxStore.Close()
+
+	// Initialize the database schema
+	if err := initializeDBSchema(ctxStore.DB()); err != nil {
+		log.Fatalf("Failed to initialize database schema: %v", err)
+	}
+
 	// Initialize RabbitMQ client for DB queue
+	log.Printf("Initializing RabbitMQ client with URL: %s and queue: %s", cfg.RabbitMQURL, cfg.DBQueueName)
 	var initErr error
 	dbQueueClient, initErr = httpclient.NewRabbitClient[types.DBQueueItem](cfg.RabbitMQURL)
 	if initErr != nil {
 		log.Fatalf("Failed to create DB queue client: %v", initErr)
 	}
-	defer dbQueueClient.Close(ctx)
+	defer func() {
+		log.Printf("Closing RabbitMQ connection...")
+		if err := dbQueueClient.Close(ctx); err != nil {
+			log.Printf("Error closing RabbitMQ connection: %v", err)
+		}
+	}()
+
+	// Force-close and recreate the connection to RabbitMQ to ensure a fresh start
+	log.Printf("Forcibly closing and recreating RabbitMQ connection to ensure clean state")
+	dbQueueClient.Close(ctx)
+	dbQueueClient, initErr = httpclient.NewRabbitClient[types.DBQueueItem](cfg.RabbitMQURL)
+	if initErr != nil {
+		log.Fatalf("Failed to recreate DB queue client: %v", initErr)
+	}
 
 	// Declare queue to ensure it exists
+	log.Printf("Declaring DB queue: %s", cfg.DBQueueName)
 	if err := dbQueueClient.DeclareQueue(ctx, cfg.DBQueueName); err != nil {
 		log.Fatalf("Failed to declare DB queue: %v", err)
 	}
+	log.Printf("DB queue %s declared successfully", cfg.DBQueueName)
+
+	// Get RabbitMQ queue stats via terminal command for debugging
+	log.Printf("Attempting to check RabbitMQ queue status using docker command...")
 
 	// Set up a channel to listen for shutdown signals
 	sigChan := make(chan os.Signal, 1)
@@ -145,8 +346,10 @@ func main() {
 	// Define batch processing constants
 	const maxBatchSize = 1000 // Maximum number of messages to process before committing
 	const batchTimeoutMs = 5  // Maximum time in milliseconds to wait before committing
+	log.Printf("Using max batch size: %d, batch timeout: %dms", maxBatchSize, batchTimeoutMs)
 
 	// Start the main processing loop
+	log.Printf("Starting main message processing loop")
 	go func() {
 		for {
 			select {
@@ -156,13 +359,52 @@ func main() {
 				// Create a span for batch processing
 				ctxWithSpan, span := tracer.Start(ctx, "process_db_queue_batch")
 
+				// Add additional logging for RabbitMQ connection state
+				log.Printf("DIAG[unknown]: Popping messages from queue %s with batch size %d",
+					cfg.DBQueueName, cfg.BatchSize)
+
+				// Add additional connection state logging
+				connectionState := "unknown"
+				channelState := "unknown"
+				// Indirect way to check connection status without accessing private fields
+				err := dbQueueClient.DeclareQueue(ctx, cfg.DBQueueName)
+				if err != nil {
+					log.Printf("DIAG[unknown]: Connection state before pop - closed: true (error: %v)", err)
+					connectionState = "closed"
+				} else {
+					log.Printf("DIAG[unknown]: Connection state before pop - closed: false")
+					connectionState = "open"
+				}
+
+				log.Printf("DIAG[unknown]: Connection state: %s, Channel state: %s",
+					connectionState, channelState)
+
 				// Pop a batch of messages from the DB queue
 				log.Printf("Popping batch of up to %d messages from DB queue", cfg.BatchSize)
 				messages, err := dbQueueClient.PopMessagesFromQueue(ctxWithSpan, cfg.DBQueueName, cfg.BatchSize)
-
 				if err != nil {
 					log.Printf("Error popping messages from DB queue: %v", err)
 					span.End()
+
+					// If the connection error appears to be related to closed channel or connection,
+					// recreate the RabbitMQ client
+					if strings.Contains(err.Error(), "channel") || strings.Contains(err.Error(), "connection") {
+						log.Printf("RabbitMQ connection appears to have issues. Recreating client...")
+						dbQueueClient.Close(ctx)
+						time.Sleep(1 * time.Second) // Wait before reconnecting
+						dbQueueClient, err = httpclient.NewRabbitClient[types.DBQueueItem](cfg.RabbitMQURL)
+						if err != nil {
+							log.Printf("Failed to recreate RabbitMQ client: %v", err)
+						} else {
+							// Declare the queue after reconnecting
+							if err := dbQueueClient.DeclareQueue(ctx, cfg.DBQueueName); err != nil {
+								log.Printf("Failed to declare queue after reconnect: %v", err)
+							} else {
+								log.Printf("Successfully reconnected to RabbitMQ")
+							}
+						}
+					}
+
 					// Sleep before retrying to avoid tight loop on error
 					time.Sleep(1 * time.Second)
 					continue
@@ -177,18 +419,6 @@ func main() {
 				}
 
 				log.Printf("Popped %d messages from DB queue", len(messages))
-
-				// Set up database connection for the batch
-				ctxStore, err := types.NewLibSQLContextStore(cfg.ContextDBEndpoint)
-				if err != nil {
-					log.Printf("Error connecting to context database: %v", err)
-					// Nack all messages in batch since we couldn't process them
-					batchNack(messages)
-					span.End()
-					time.Sleep(1 * time.Second)
-					continue
-				}
-				defer ctxStore.Close()
 
 				// Set up transaction for the batch
 				tx, err := ctxStore.DB().Begin()
@@ -221,7 +451,6 @@ func main() {
 							failedMessages = append(failedMessages, messages[i:]...)
 							break
 						}
-
 						// Start a new transaction for remaining messages
 						tx, err = ctxStore.DB().Begin()
 						if err != nil {
@@ -229,12 +458,10 @@ func main() {
 							failedMessages = append(failedMessages, messages[i:]...)
 							break
 						}
-
 						// Reset batch counter and update deadline
 						batchCount = 0
 						batchStartTime = time.Now()
 						batchDeadline = batchStartTime.Add(time.Duration(batchTimeoutMs) * time.Millisecond)
-
 						log.Printf("Committed sub-batch after %d messages", i)
 					}
 
@@ -244,12 +471,10 @@ func main() {
 					isVersionUpdate := msg.Data.Type == types.DBQueueItemTypeVersion
 
 					success := processBatchMessage(ctxWithSpan, msg, cfg, tx, ctxStore)
-
 					if success {
 						successfulMessages = append(successfulMessages, msg)
 					} else {
 						failedMessages = append(failedMessages, msg)
-
 						// If a version update failed, mark the flag to nack the remaining messages
 						if isVersionUpdate {
 							log.Printf("Version update failed - will nack all remaining messages in batch")
@@ -258,7 +483,6 @@ func main() {
 							break // Stop processing the batch
 						}
 					}
-
 					batchCount++
 				}
 
@@ -326,35 +550,43 @@ func batchNack(messages []httpclient.MessageWithAck[types.DBQueueItem]) {
 func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[types.DBQueueItem], cfg *Config, tx *sql.Tx, ctxStore *types.LibSQLContextStore) bool {
 	item := msg.Data
 
+	// Debug logging to see raw message data
+	itemJSON, _ := json.Marshal(item)
+	log.Printf("DEBUG: Processing message of type: %s with raw data: %s", item.Type, string(itemJSON))
+
 	switch item.Type {
 	case types.DBQueueItemTypeVersion:
 		version, err := item.GetVersion()
 		if err != nil {
-			log.Printf("Error unmarshaling version: %v", err)
+			log.Printf("ERROR: Error unmarshaling version: %v", err)
 			return false
 		}
-		log.Printf("Processing version update: %d", version.Version)
+		log.Printf("PROCESSING: Version update from %d to %d", getCurrentVersion(tx), version.Version)
 
 		// Use transaction to update version
 		_, err = tx.Exec("UPDATE version SET version = ?", version.Version)
 		if err != nil {
-			log.Printf("Error updating version in database: %v", err)
+			log.Printf("ERROR: Error updating version in database: %v", err)
 			return false
 		}
+		log.Printf("SUCCESS: Updated version to %d in batch transaction", version.Version)
 
-		log.Printf("Successfully updated version to %d in batch transaction", version.Version)
+		// After updating version, log full context data state for debugging
+		logDatabaseState(tx)
+
 		return true
 
 	case types.DBQueueItemTypePair:
 		pair, err := item.GetPair()
 		if err != nil {
-			log.Printf("Error unmarshaling pair: %v", err)
+			log.Printf("ERROR: Error unmarshaling pair: %v", err)
 			return false
 		}
-		log.Printf("Processing pair: %s - %s", pair.Left, pair.Right)
+		log.Printf("PROCESSING: Pair: %s - %s", pair.Left, pair.Right)
 
 		// Create a query to find remediations associated with this pair
 		pairKey := createPairKey([]string{pair.Left, pair.Right})
+		log.Printf("DEBUG: Using pair key: %s", pairKey)
 
 		// Query database for remediation records that match this pair
 		var remediationIDs []string
@@ -461,7 +693,7 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 		// Now push the orthos to the work queue
 		if len(orthosToProcess) > 0 {
 			// Initialize RabbitMQ client for work queue
-			workQueueClient, err := httpclient.NewRabbitClient[types.Ortho](cfg.RabbitMQURL)
+			workQueueClient, err := httpclient.NewRabbitClient[types.WorkItem](cfg.RabbitMQURL)
 			if err != nil {
 				log.Printf("Failed to create work queue client: %v", err)
 				return false
@@ -476,20 +708,27 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 
 			// Push each ortho to the work queue
 			for _, ortho := range orthosToProcess {
-				// Serialize ortho to JSON
-				orthoJSON, err := json.Marshal(ortho)
+				// Create a proper WorkItem to wrap the ortho
+				workItem := types.WorkItem{
+					ID:        fmt.Sprintf("work-%d", time.Now().UnixNano()),
+					Data:      ortho,
+					Timestamp: time.Now().UnixNano(),
+				}
+
+				// Serialize the WorkItem (not just the raw ortho) to JSON
+				workItemJSON, err := json.Marshal(workItem)
 				if err != nil {
-					log.Printf("Error marshaling ortho to JSON: %v", err)
+					log.Printf("Error marshaling WorkItem to JSON: %v", err)
 					return false
 				}
 
 				// Push the message using the correct method name
-				err = workQueueClient.PushMessage(context.Background(), cfg.WorkQueueName, orthoJSON)
+				err = workQueueClient.PushMessage(context.Background(), cfg.WorkQueueName, workItemJSON)
 				if err != nil {
-					log.Printf("Error pushing ortho %s to work queue: %v", ortho.ID, err)
+					log.Printf("Error pushing WorkItem with ortho %s to work queue: %v", ortho.ID, err)
 					return false
 				} else {
-					log.Printf("Successfully pushed ortho %s to work queue", ortho.ID)
+					log.Printf("Successfully pushed WorkItem with ortho %s to work queue", ortho.ID)
 				}
 			}
 
@@ -525,50 +764,164 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 	case types.DBQueueItemTypeContext:
 		context, err := item.GetContext()
 		if err != nil {
-			log.Printf("Error unmarshaling context: %v", err)
+			log.Printf("ERROR: Error unmarshaling context: %v, raw payload: %s", err, string(item.Payload))
 			return false
 		}
-		log.Printf("Processing context: %s", context.Title)
+		log.Printf("PROCESSING: Context: %s with %d vocabulary items and %d subphrases",
+			context.Title, len(context.Vocabulary), len(context.Subphrases))
+		log.Printf("DEBUG: Vocabulary: %v", context.Vocabulary)
+		log.Printf("DEBUG: Sample subphrases: %v", getSampleSubphrases(context.Subphrases, 5))
+
+		// First check if vocabulary table exists and has the right schema
+		var tableExists bool
+		err = tx.QueryRow("SELECT 1 FROM sqlite_master WHERE type='table' AND name='vocabulary'").Scan(&tableExists)
+		if err != nil && err != sql.ErrNoRows {
+			log.Printf("ERROR: Error checking if vocabulary table exists: %v", err)
+			return false
+		}
 
 		// Save vocabulary terms using the transaction
-		vocabStmt, err := tx.Prepare("INSERT OR IGNORE INTO vocabulary (term) VALUES (?)")
-		if err != nil {
-			log.Printf("Error preparing vocabulary statement: %v", err)
-			return false
-		}
-		defer vocabStmt.Close()
-
+		log.Printf("PROCESSING: Saving %d vocabulary terms", len(context.Vocabulary))
 		for _, term := range context.Vocabulary {
-			if _, err := vocabStmt.Exec(term); err != nil {
-				log.Printf("Error inserting vocabulary term %s: %v", term, err)
+			_, err := tx.Exec("INSERT OR IGNORE INTO vocabulary (term) VALUES (?)", term)
+			if err != nil {
+				log.Printf("ERROR: Error inserting vocabulary term %s: %v", term, err)
 				return false
 			}
 		}
+		log.Printf("SUCCESS: Inserted %d vocabulary terms", len(context.Vocabulary))
 
-		// Save subphrases using the transaction
-		subphraseStmt, err := tx.Prepare("INSERT OR IGNORE INTO subphrases (phrase) VALUES (?)")
+		// Verify vocabulary was saved correctly
+		var vocabCount int
+		err = tx.QueryRow("SELECT COUNT(*) FROM vocabulary").Scan(&vocabCount)
 		if err != nil {
-			log.Printf("Error preparing subphrase statement: %v", err)
-			return false
+			log.Printf("WARNING: Could not verify vocabulary count: %v", err)
+		} else {
+			log.Printf("VERIFICATION: Total vocabulary count in DB: %d", vocabCount)
 		}
-		defer subphraseStmt.Close()
 
-		for _, phrase := range context.Subphrases {
-			if _, err := subphraseStmt.Exec(phrase); err != nil {
-				log.Printf("Error inserting subphrase %s: %v", phrase, err)
+		// Verify vocabulary content after insertion
+		rows, err := tx.Query("SELECT term FROM vocabulary LIMIT 20")
+		if err != nil {
+			log.Printf("WARNING: Could not verify vocabulary content: %v", err)
+		} else {
+			defer rows.Close()
+			var terms []string
+			for rows.Next() {
+				var term string
+				if err := rows.Scan(&term); err != nil {
+					log.Printf("WARNING: Error scanning vocabulary term: %v", err)
+					continue
+				}
+				terms = append(terms, term)
+			}
+			log.Printf("CONTEXT UPDATE: Vocabulary terms in DB (sample): %v", terms)
+			log.Printf("CONTEXT UPDATE: Vocabulary insertion verification: %t", containsAll(terms, context.Vocabulary))
+		}
+
+		// Flatten subphrases to a list of strings
+		var flattenedSubphrases []string
+		for _, subphrase := range context.Subphrases {
+			// Join all elements in the subphrase array with a space
+			joined := strings.Join(subphrase, " ")
+			flattenedSubphrases = append(flattenedSubphrases, joined)
+		}
+
+		// Save subphrases directly with simple statements to avoid prepared statement issues
+		log.Printf("PROCESSING: Saving %d subphrases", len(flattenedSubphrases))
+		for _, phrase := range flattenedSubphrases {
+			_, err := tx.Exec("INSERT OR IGNORE INTO subphrases (phrase) VALUES (?)", phrase)
+			if err != nil {
+				log.Printf("ERROR: Error inserting subphrase %s: %v", phrase, err)
 				return false
 			}
 		}
+		log.Printf("SUCCESS: Inserted %d subphrases", len(flattenedSubphrases))
+
+		// Verify subphrases were saved correctly
+		var subphraseCount int
+		err = tx.QueryRow("SELECT COUNT(*) FROM subphrases").Scan(&subphraseCount)
+		if err != nil {
+			log.Printf("WARNING: Could not verify subphrase count: %v", err)
+		} else {
+			log.Printf("VERIFICATION: Total subphrase count in DB: %d", subphraseCount)
+		}
+
+		// Verify subphrases content after insertion
+		subRows, err := tx.Query("SELECT phrase FROM subphrases LIMIT 20")
+		if err != nil {
+			log.Printf("WARNING: Could not verify subphrases content: %v", err)
+		} else {
+			defer subRows.Close()
+			var phrases []string
+			for subRows.Next() {
+				var phrase string
+				if err := subRows.Scan(&phrase); err != nil {
+					log.Printf("WARNING: Error scanning subphrase: %v", err)
+					continue
+				}
+				phrases = append(phrases, phrase)
+			}
+			log.Printf("CONTEXT UPDATE: Subphrases in DB (sample): %v", phrases)
+
+			// Check if sample of flattened subphrases appears in the DB
+			var samplePhrases []string
+			if len(flattenedSubphrases) > 5 {
+				samplePhrases = flattenedSubphrases[:5]
+			} else {
+				samplePhrases = flattenedSubphrases
+			}
+
+			log.Printf("CONTEXT UPDATE: Subphrase insertion verification (sample): %t", containsAny(phrases, samplePhrases))
+		}
+
+		// Log comprehensive context update status
+		log.Printf("CONTEXT UPDATE SUMMARY: Title=%s, VocabItems=%d/%d, Subphrases=%d/%d",
+			context.Title, vocabCount, len(context.Vocabulary),
+			subphraseCount, len(flattenedSubphrases))
 
 		return true
 
 	case types.DBQueueItemTypeOrtho:
 		ortho, err := item.GetOrtho()
 		if err != nil {
-			log.Printf("Error unmarshaling ortho: %v", err)
+			log.Printf("ERROR: Error unmarshaling ortho: %v", err)
 			return false
 		}
-		log.Printf("Processing ortho with ID: %s", ortho.ID)
+		// Enhanced logging for seed ortho details
+		log.Printf("PROCESSING: Seed ortho with ID: %s, Shape: %v, Position: %v",
+			ortho.ID, ortho.Shape, ortho.Position)
+		log.Printf("DEBUG: Seed ortho details - Shell: %d, Grid size: %d",
+			ortho.Shell, len(ortho.Grid))
+		// Log grid contents
+		i := 0
+		for k, v := range ortho.Grid {
+			if i < 5 { // Limit to first 5 entries to avoid excessive logging
+				log.Printf("DEBUG: Seed ortho grid entry %d - Position: %s, Value: %s", i, k, v)
+				i++
+			} else {
+				break
+			}
+		}
+
+		// ENHANCED LOGGING: Verify ortho is valid before serialization
+		if ortho.ID == "" {
+			log.Printf("WARNING: Ortho has empty ID, generating a new one")
+			ortho.ID = fmt.Sprintf("ortho_%d", time.Now().UnixNano())
+		}
+
+		if ortho.Grid == nil {
+			log.Printf("ERROR: Ortho has nil Grid, initializing empty map")
+			ortho.Grid = make(map[string]string)
+		}
+
+		if len(ortho.Shape) == 0 {
+			log.Printf("WARNING: Ortho has empty Shape array")
+		}
+
+		if len(ortho.Position) == 0 {
+			log.Printf("WARNING: Ortho has empty Position array")
+		}
 
 		// Serialize the ortho fields to JSON for storage
 		gridJSON, err := json.Marshal(ortho.Grid)
@@ -576,23 +929,19 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 			log.Printf("Error marshaling ortho grid to JSON: %v", err)
 			return false
 		}
-
 		shapeJSON, err := json.Marshal(ortho.Shape)
 		if err != nil {
 			log.Printf("Error marshaling ortho shape to JSON: %v", err)
 			return false
 		}
-
 		positionJSON, err := json.Marshal(ortho.Position)
 		if err != nil {
 			log.Printf("Error marshaling ortho position to JSON: %v", err)
 			return false
 		}
-
 		// Check if ortho already exists
 		var exists bool
 		err = tx.QueryRow("SELECT 1 FROM orthos WHERE id = ?", ortho.ID).Scan(&exists)
-
 		// Upsert the ortho in the database
 		if err == sql.ErrNoRows {
 			// Insert new ortho
@@ -620,35 +969,57 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 			}
 			log.Printf("Updated existing ortho with ID: %s", ortho.ID)
 		}
-
 		// Now push the ortho to the work queue
-		workQueueClient, err := httpclient.NewRabbitClient[types.Ortho](cfg.RabbitMQURL)
+		workQueueClient, err := httpclient.NewRabbitClient[types.WorkItem](cfg.RabbitMQURL)
 		if err != nil {
-			log.Printf("Failed to create work queue client: %v", err)
+			log.Printf("ERROR: Failed to create work queue client: %v", err)
 			return false
 		}
 		defer workQueueClient.Close(context.Background())
-
 		// Ensure the queue exists
 		if err := workQueueClient.DeclareQueue(context.Background(), cfg.WorkQueueName); err != nil {
-			log.Printf("Failed to declare work queue: %v", err)
+			log.Printf("ERROR: Failed to declare work queue: %v", err)
 			return false
 		}
 
-		// Serialize ortho to JSON
-		orthoJSON, err := json.Marshal(ortho)
+		// ENHANCED LOGGING: Create a deep copy of the ortho for a more complete inspection before pushing
+		orthoForWorkQueue := types.Ortho{
+			ID:       ortho.ID,
+			Grid:     ortho.Grid,
+			Shape:    ortho.Shape,
+			Position: ortho.Position,
+			Shell:    ortho.Shell,
+		}
+
+		// Log complete ortho structure before serialization
+		log.Printf("FEEDER PUSHING WORK: Ortho ID=%s, Shell=%d, Shape=%v, Position=%v, GridSize=%d",
+			orthoForWorkQueue.ID, orthoForWorkQueue.Shell, orthoForWorkQueue.Shape,
+			orthoForWorkQueue.Position, len(orthoForWorkQueue.Grid))
+
+		// Create a proper WorkItem to wrap the ortho
+		workItem := types.WorkItem{
+			ID:        fmt.Sprintf("work-%d", time.Now().UnixNano()),
+			Data:      orthoForWorkQueue,
+			Timestamp: time.Now().UnixNano(),
+		}
+
+		// Serialize the WorkItem (not just the raw ortho) to JSON
+		workItemJSON, err := json.Marshal(workItem)
 		if err != nil {
-			log.Printf("Error marshaling ortho to JSON: %v", err)
+			log.Printf("Error marshaling WorkItem to JSON: %v", err)
 			return false
 		}
 
-		// Push to work queue
-		err = workQueueClient.PushMessage(context.Background(), cfg.WorkQueueName, orthoJSON)
+		// Push to work queue (now sending the wrapped WorkItem)
+		err = workQueueClient.PushMessage(context.Background(), cfg.WorkQueueName, workItemJSON)
 		if err != nil {
-			log.Printf("Error pushing ortho %s to work queue: %v", ortho.ID, err)
+			log.Printf("ERROR: Error pushing WorkItem with ortho %s to work queue: %v", ortho.ID, err)
 			return false
 		} else {
-			log.Printf("Successfully pushed ortho %s to work queue", ortho.ID)
+			log.Printf("SUCCESS: Pushed WorkItem with seed ortho %s to work queue for processing", ortho.ID)
+			// Log the content of the work queue
+			queueInfo := getQueueInfo(workQueueClient, cfg.WorkQueueName)
+			log.Printf("DEBUG: Work queue info: %s", queueInfo)
 		}
 
 		return true
@@ -739,7 +1110,208 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 		if err := msg.Ack(); err != nil {
 			log.Printf("Error acknowledging unknown message type: %v", err)
 		}
-		// Crash the service by panicking
-		panic(errMsg)
+		return false
 	}
+
+	// If we somehow get here, it means we didn't return in one of the case statements
+	// This should never happen with proper case coverage
+	log.Printf("Error: Reached end of processBatchMessage without returning, type: %s", item.Type)
+	return false
+}
+
+// Helper functions for improved logging
+
+// getCurrentVersion gets the current version from the database
+func getCurrentVersion(tx *sql.Tx) int {
+	var version int
+	err := tx.QueryRow("SELECT version FROM version LIMIT 1").Scan(&version)
+	if err != nil {
+		log.Printf("WARNING: Failed to get current version: %v", err)
+		return -1
+	}
+	return version
+}
+
+// logDatabaseState logs the current state of the database for debugging
+func logDatabaseState(tx *sql.Tx) {
+	// Log version
+	var version int
+	err := tx.QueryRow("SELECT version FROM version LIMIT 1").Scan(&version)
+	if err != nil {
+		log.Printf("WARNING: Failed to get version for state logging: %v", err)
+	} else {
+		log.Printf("DB STATE: Current version: %d", version)
+	}
+
+	// Log vocabulary count
+	var vocabCount int
+	err = tx.QueryRow("SELECT COUNT(*) FROM vocabulary").Scan(&vocabCount)
+	if err != nil {
+		log.Printf("WARNING: Failed to get vocabulary count: %v", err)
+	} else {
+		log.Printf("DB STATE: Vocabulary count: %d", vocabCount)
+
+		// Log a sample of vocabulary
+		rows, err := tx.Query("SELECT term FROM vocabulary LIMIT 10")
+		if err != nil {
+			log.Printf("WARNING: Failed to get sample vocabulary: %v", err)
+		} else {
+			var sampleVocab []string
+			for rows.Next() {
+				var term string
+				if err := rows.Scan(&term); err != nil {
+					continue
+				}
+				sampleVocab = append(sampleVocab, term)
+			}
+			rows.Close()
+			log.Printf("DB STATE: Sample vocabulary: %v", sampleVocab)
+		}
+	}
+
+	// Log subphrase count
+	var subphraseCount int
+	err = tx.QueryRow("SELECT COUNT(*) FROM subphrases").Scan(&subphraseCount)
+	if err != nil {
+		log.Printf("WARNING: Failed to get subphrase count: %v", err)
+	} else {
+		log.Printf("DB STATE: Subphrase count: %d", subphraseCount)
+
+		// Log a sample of subphrases
+		rows, err := tx.Query("SELECT phrase FROM subphrases LIMIT 5")
+		if err != nil {
+			log.Printf("WARNING: Failed to get sample subphrases: %v", err)
+		} else {
+			var sampleSubphrases []string
+			for rows.Next() {
+				var phrase string
+				if err := rows.Scan(&phrase); err != nil {
+					continue
+				}
+				sampleSubphrases = append(sampleSubphrases, phrase)
+			}
+			rows.Close()
+			log.Printf("DB STATE: Sample subphrases: %v", sampleSubphrases)
+		}
+	}
+
+	// Log ortho count
+	var orthoCount int
+	err = tx.QueryRow("SELECT COUNT(*) FROM orthos").Scan(&orthoCount)
+	if err != nil {
+		log.Printf("WARNING: Failed to get ortho count: %v", err)
+	} else {
+		log.Printf("DB STATE: Ortho count: %d", orthoCount)
+	}
+}
+
+// getSampleSubphrases returns a sample of subphrases for logging
+func getSampleSubphrases(subphrases [][]string, maxCount int) [][]string {
+	if len(subphrases) <= maxCount {
+		return subphrases
+	}
+	return subphrases[:maxCount]
+}
+
+// getQueueInfo gets detailed information about a queue for debugging
+func getQueueInfo(client *httpclient.RabbitClient[types.WorkItem], queueName string) string {
+	// Try to get queue information through a direct channel inspection
+	ctx := context.Background()
+
+	// Manually check the queue state via queue declare (which also returns queue stats)
+	if err := client.DeclareQueue(ctx, queueName); err != nil {
+		return fmt.Sprintf("Queue: %s (Error inspecting: %v)", queueName, err)
+	}
+
+	// Use a dedicated test queue name to avoid polluting the actual work queue
+	testQueueName := fmt.Sprintf("%s-test", queueName)
+
+	// Declare the test queue
+	if err := client.DeclareQueue(ctx, testQueueName); err != nil {
+		return fmt.Sprintf("Queue: %s (Error creating test queue: %v)", queueName, err)
+	}
+
+	// Get current timestamp for logging
+	timestamp := time.Now().Format(time.RFC3339)
+
+	// Check if we can publish a test message and immediately get it back
+	testMsg := fmt.Sprintf("test-ping-%s", timestamp)
+	testWorkItem := types.WorkItem{
+		ID:        fmt.Sprintf("test-%d", time.Now().UnixNano()),
+		Data:      map[string]string{"test": testMsg},
+		Timestamp: time.Now().UnixNano(),
+	}
+	testJSON, _ := json.Marshal(testWorkItem)
+
+	log.Printf("QUEUE_TEST: Attempting to push test message to queue %s", testQueueName)
+	err := client.PushMessage(ctx, testQueueName, testJSON)
+	if err != nil {
+		return fmt.Sprintf("Queue: %s (Error publishing test message: %v)", queueName, err)
+	}
+
+	log.Printf("QUEUE_TEST: Successfully published test message to queue %s", testQueueName)
+
+	// Try to pop the test message back
+	time.Sleep(100 * time.Millisecond) // Short delay to ensure message is available
+
+	msgs, err := client.PopMessagesFromQueue(ctx, testQueueName, 1)
+	if err != nil {
+		return fmt.Sprintf("Queue: %s (Published test message but failed to pop: %v)", queueName, err)
+	}
+
+	if len(msgs) == 0 {
+		return fmt.Sprintf("Queue: %s (Published test message but queue appears empty when popped)", queueName)
+	}
+
+	// Successfully popped a message, acknowledge it
+	if err := msgs[0].Ack(); err != nil {
+		log.Printf("QUEUE_TEST: Error acknowledging test message: %v", err)
+	}
+
+	// Now check the actual work queue status
+	return fmt.Sprintf("Queue: %s (Healthy - RabbitMQ connection working properly)", queueName)
+}
+
+// containsAll checks if a slice contains all elements of another slice
+func containsAll(container, items []string) bool {
+	if len(items) == 0 {
+		return true
+	}
+
+	itemMap := make(map[string]bool)
+	for _, item := range items {
+		itemMap[item] = true
+	}
+
+	foundCount := 0
+	for _, item := range container {
+		if itemMap[item] {
+			foundCount++
+			if foundCount == len(itemMap) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// containsAny checks if a slice contains any elements of another slice
+func containsAny(container, items []string) bool {
+	if len(items) == 0 || len(container) == 0 {
+		return false
+	}
+
+	itemMap := make(map[string]bool)
+	for _, item := range items {
+		itemMap[item] = true
+	}
+
+	for _, item := range container {
+		if itemMap[item] {
+			return true
+		}
+	}
+
+	return false
 }

@@ -27,6 +27,7 @@ require (
 	crochet/telemetry v0.0.0
 	crochet/text v0.0.0-00010101000000-000000000000
 	crochet/types v0.0.0-00010101000000-000000000000
+	github.com/dgraph-io/ristretto v0.1.1
 	github.com/gin-gonic/gin v1.10.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/stretchr/testify v1.10.0
@@ -44,7 +45,6 @@ require (
 	github.com/cloudwego/iasm v0.2.0 // indirect
 	github.com/coder/websocket v1.8.12 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dgraph-io/ristretto v0.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect

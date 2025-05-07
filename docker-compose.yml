@@ -24,19 +24,18 @@ services:
       start_period: 30s
     environment:
       - REPOSITORY_SERVICE_NAME=repository
-      - REPOSITORY_CONTEXT_SERVICE_URL=http://context:8081
       - REPOSITORY_PORT=8080
       - REPOSITORY_JAEGER_ENDPOINT=jaeger:4317
       - REPOSITORY_METRICS_ENDPOINT=otel-collector:4317
       - REPOSITORY_PYROSCOPE_ENDPOINT=http://pyroscope:4040
       - REPOSITORY_HOST=0.0.0.0
-      - REPOSITORY_CONTEXT_DB_ENDPOINT=file:/data/crochet.db?mode=memory&cache=shared
+      - REPOSITORY_CONTEXT_DB_ENDPOINT=file:/data/crochet.db?cache=shared
       - REPOSITORY_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - REPOSITORY_DB_QUEUE_NAME=db-queue
       - REPOSITORY_WORK_QUEUE_NAME=work-queue
-      - REMEDIATIONS_SERVICE_URL=http://context:8081/remediations
-      - REPOSITORY_ORTHOS_SERVICE_URL=http://context:8081/orthos
       - REPOSITORY_WORK_SERVER_URL=http://repository:8080/work
+      - REPOSITORY_CONTEXT_SERVICE_URL=http://repository:8080
+      - REPOSITORY_ORTHOS_SERVICE_URL=http://repository:8080
     volumes:
       - context-data:/data
     logging:
@@ -44,6 +43,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
   search:
     build:
       context: .
@@ -62,6 +62,7 @@ services:
       - jaeger
       - otel-collector
       - pyroscope
+      - repository
     healthcheck:
       test: ["CMD", "curl", "-f", "-H", "Accept: application/json", "http://localhost:8085/health"]
       interval: 5s
@@ -75,7 +76,7 @@ services:
       - SEARCH_JAEGER_ENDPOINT=jaeger:4317
       - SEARCH_METRICS_ENDPOINT=otel-collector:4317
       - SEARCH_PYROSCOPE_ENDPOINT=http://pyroscope:4040
-      - SEARCH_CONTEXT_SERVICE_URL=http://context:8081
+      - SEARCH_CONTEXT_SERVICE_URL=http://repository:8080
       - REPOSITORY_SERVICE_URL=http://repository:8080
     logging:
       driver: "json-file"
@@ -102,11 +103,11 @@ services:
       - FEEDER_WORK_QUEUE_NAME=work-queue
       - FEEDER_BATCH_SIZE=10
       - FEEDER_PROCESSING_TIMEOUT=30s
-      - FEEDER_CONTEXT_SERVICE_URL=http://context:8081
+      - FEEDER_CONTEXT_SERVICE_URL=http://repository:8080
       - FEEDER_JAEGER_ENDPOINT=jaeger:4317
       - FEEDER_METRICS_ENDPOINT=otel-collector:4317
       - FEEDER_PYROSCOPE_ENDPOINT=http://pyroscope:4040
-      - FEEDER_CONTEXT_DB_ENDPOINT=file:/data/crochet.db?mode=memory&cache=shared
+      - FEEDER_CONTEXT_DB_ENDPOINT=file:/data/crochet.db?cache=shared
     volumes:
       - context-data:/data
     logging:

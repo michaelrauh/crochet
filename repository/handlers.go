@@ -221,9 +221,64 @@ func (h *RepositoryHandler) HandleGetContext(c *gin.Context) {
 	tracer := otel.Tracer("crochet/repository")
 	ctx, span := tracer.Start(c.Request.Context(), "repository.handleGetContext")
 	defer span.End()
-
 	requestID := ctx.Value("request_id")
 	log.Printf("[%s] Received GET /context request", requestID)
+
+	// Add direct database inspection logging
+	if db, ok := h.Store.(*types.LibSQLContextStore); ok {
+		log.Printf("[%s] DEBUG: Direct DB inspection for diagnosis", requestID)
+		dbConn := db.DB()
+
+		// Check vocabulary count directly
+		var vocabCount int
+		err := dbConn.QueryRow("SELECT COUNT(*) FROM vocabulary").Scan(&vocabCount)
+		if err != nil {
+			log.Printf("[%s] ERROR checking vocabulary count: %v", requestID, err)
+		} else {
+			log.Printf("[%s] DEBUG: Direct DB check - vocabulary count: %d", requestID, vocabCount)
+
+			// If there are words, sample them
+			if vocabCount > 0 {
+				rows, err := dbConn.Query("SELECT word FROM vocabulary LIMIT 5")
+				if err != nil {
+					log.Printf("[%s] ERROR sampling vocabulary: %v", requestID, err)
+				} else {
+					defer rows.Close()
+					words := []string{}
+					for rows.Next() {
+						var word string
+						if err := rows.Scan(&word); err == nil {
+							words = append(words, word)
+						}
+					}
+					log.Printf("[%s] DEBUG: Sample vocabulary words: %v", requestID, words)
+				}
+			}
+		}
+
+		// Check subphrases count directly
+		var subphrasesCount int
+		err = dbConn.QueryRow("SELECT COUNT(*) FROM subphrases").Scan(&subphrasesCount)
+		if err != nil {
+			log.Printf("[%s] ERROR checking subphrases count: %v", requestID, err)
+		} else {
+			log.Printf("[%s] DEBUG: Direct DB check - subphrases count: %d", requestID, subphrasesCount)
+		}
+
+		// Check version directly from DB
+		var dbVersion int
+		err = dbConn.QueryRow("SELECT version FROM version WHERE id = 1").Scan(&dbVersion)
+		if err != nil {
+			log.Printf("[%s] ERROR checking DB version: %v", requestID, err)
+		} else {
+			log.Printf("[%s] DEBUG: Direct DB check - version: %d", requestID, dbVersion)
+		}
+
+		// Check queue status
+		var queueInfo string
+		err = dbConn.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'").Scan(&queueInfo)
+		log.Printf("[%s] DEBUG: DB tables check: %v", requestID, queueInfo)
+	}
 
 	vocabularySlice := h.Store.GetVocabulary()
 	log.Printf("[%s] Retrieved vocabulary from store: %v", requestID, vocabularySlice)

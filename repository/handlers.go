@@ -171,18 +171,39 @@ func (h *RepositoryHandler) HandlePostResults(c *gin.Context) {
 	newOrthos := h.OrthosCache.FilterNewOrthos(request.Orthos)
 	log.Printf("[%s] Received %d orthos, %d are new", requestID, len(request.Orthos), len(newOrthos))
 
-	// Save the new orthos to the database
+	// Push new orthos to the DB queue instead of writing directly to the DB
 	if len(newOrthos) > 0 {
-		log.Printf("[%s] Saving %d new orthos to database", requestID, len(newOrthos))
-		if err := h.Store.SaveOrthos(newOrthos); err != nil {
-			telemetry.LogAndError(c, err, "repository", "Failed to save orthos to database")
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"status":  "error",
-				"message": "Failed to save orthos to database",
-			})
-			return
+		// Push each new ortho to the DB queue
+		for _, ortho := range newOrthos {
+			log.Printf("[%s] Pushing ortho with ID %s to DB queue", requestID, ortho.ID)
+			err = h.RabbitMQService.PushOrtho(ctx, ortho)
+			if err != nil {
+				telemetry.LogAndError(c, err, "repository", "Failed to push ortho to DB queue")
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"status":  "error",
+					"message": "Failed to push ortho to DB queue",
+				})
+				return
+			}
 		}
-		log.Printf("[%s] Successfully saved %d new orthos to database", requestID, len(newOrthos))
+		log.Printf("[%s] Successfully pushed %d orthos to DB queue", requestID, len(newOrthos))
+	}
+
+	// Push remediations to the DB queue
+	if len(request.Remediations) > 0 {
+		log.Printf("[%s] Pushing %d remediations to DB queue", requestID, len(request.Remediations))
+		for _, remediation := range request.Remediations {
+			err = h.RabbitMQService.PushRemediation(ctx, remediation)
+			if err != nil {
+				telemetry.LogAndError(c, err, "repository", "Failed to push remediation to DB queue")
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"status":  "error",
+					"message": "Failed to push remediation to DB queue",
+				})
+				return
+			}
+		}
+		log.Printf("[%s] Successfully pushed %d remediations to DB queue", requestID, len(request.Remediations))
 	}
 
 	// Parse receipt tag and acknowledge it on the work queue
@@ -294,6 +315,15 @@ func (h *RepositoryHandler) HandleGetContext(c *gin.Context) {
 	}
 	log.Printf("[%s] Retrieved version from store: %d", requestID, version)
 
+	// Initialize empty slices rather than null for empty results
+	if vocabularySlice == nil {
+		vocabularySlice = []string{}
+	}
+
+	if linesSlice == nil {
+		linesSlice = [][]string{}
+	}
+
 	response := gin.H{
 		"version":    version,
 		"vocabulary": vocabularySlice,
@@ -333,9 +363,16 @@ func (h *RepositoryHandler) HandleGetWork(c *gin.Context) {
 
 	if len(messages) == 0 {
 		log.Printf("[%s] No work items available in queue", requestID)
+		// Instead of returning nil for Work, return an empty WorkItem
+		emptyWorkItem := types.WorkItem{
+			ID:        fmt.Sprintf("empty-work-%d", time.Now().UnixNano()),
+			Data:      make(map[string]interface{}),
+			Timestamp: time.Now().UnixNano(),
+		}
 		c.JSON(http.StatusOK, types.WorkResponse{
 			Version: version,
-			Work:    nil,
+			Work:    &emptyWorkItem,
+			Receipt: "",
 		})
 		return
 	}

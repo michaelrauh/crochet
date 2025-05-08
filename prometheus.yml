@@ -22,6 +22,13 @@ scrape_configs:
   #       labels:
   #         group: 'crochet-services'
 
+  - job_name: 'rabbitmq-exporter'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['rabbitmq-exporter:9419']
+        labels:
+          service: 'rabbitmq'
+
   - job_name: 'workserver'
     scrape_interval: 5s
     metrics_path: '/metrics'

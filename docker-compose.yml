@@ -131,8 +131,26 @@ services:
     environment:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
-    volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
+      # Making RabbitMQ ephemeral by not using persistent storage
+    restart: always
+
+  rabbitmq-exporter:
+    image: kbudde/rabbitmq-exporter:latest
+    ports:
+      - "9419:9419"
+    networks:
+      - app-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBIT_URL=http://rabbitmq:15672
+      - RABBIT_USER=guest
+      - RABBIT_PASSWORD=guest
+      - PUBLISH_PORT=9419
+      - RABBIT_CAPABILITIES=bert,no_sort
+      - INCLUDE_QUEUES=db-queue|work-queue
+      - RABBIT_EXPORTERS=exchange,node,overview,queue
     restart: always
   
   jaeger:
@@ -227,7 +245,6 @@ services:
 volumes:
   pyroscope-data:
   context-data:  # For persistent storage
-  rabbitmq-data:  # Added for RabbitMQ data persistence
 
 networks:
   app-network:

@@ -4,7 +4,9 @@ import (
 	"context"
 	"crochet/httpclient"
 	"crochet/types"
+	"fmt"
 	"log"
+	"time"
 )
 
 // RabbitDBQueueClient wraps a RabbitClient to implement the DBQueueClient interface
@@ -15,11 +17,25 @@ type RabbitDBQueueClient[T any] struct {
 // NewRabbitDBQueueClient creates a new client for DB queue operations
 func NewRabbitDBQueueClient[T any](url string) (*RabbitDBQueueClient[T], error) {
 	log.Printf("DIAG: Creating new RabbitDBQueueClient with URL: %s", url)
+
+	// Create a context with timeout to prevent hanging on connection issues
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	client, err := httpclient.NewRabbitClient[T](url)
 	if err != nil {
 		log.Printf("DIAG: Failed to create RabbitClient: %v", err)
 		return nil, err
 	}
+
+	// Verify connection is working by declaring a test queue
+	testQueueName := fmt.Sprintf("test-queue-%d", time.Now().UnixNano())
+	if err := client.DeclareQueue(ctx, testQueueName); err != nil {
+		log.Printf("DIAG: Connection test failed: %v", err)
+		client.Close(ctx)
+		return nil, fmt.Errorf("connection test failed: %w", err)
+	}
+
 	log.Printf("DIAG: Successfully created RabbitDBQueueClient")
 	return &RabbitDBQueueClient[T]{
 		client: client,

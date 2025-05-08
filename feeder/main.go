@@ -142,93 +142,87 @@ func initializeDBSchema(db *sql.DB) error {
 		}
 	}()
 
-	// Clear existing schema to avoid any issues with column mismatches
-	schemaTables := []string{"remediations", "orthos", "subphrases", "vocabulary", "version"}
-	for _, table := range schemaTables {
-		_, err = tx.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", table))
-		if err != nil {
-			return fmt.Errorf("failed to drop table %s: %v", table, err)
-		}
-		log.Printf("Dropped table %s if it existed", table)
-	}
+	// IMPORTANT: We no longer drop existing tables to maintain schema compatibility with repository
+	// Instead, we use CREATE TABLE IF NOT EXISTS to ensure consistency
 
 	// Create version table
 	_, err = tx.Exec(`
-		CREATE TABLE version (
-			version INTEGER NOT NULL DEFAULT 0
-		)
-	`)
+        CREATE TABLE IF NOT EXISTS version (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            version INTEGER NOT NULL
+        )
+    `)
 	if err != nil {
 		return fmt.Errorf("failed to create version table: %v", err)
 	}
-	log.Printf("Version table created")
+	log.Printf("Version table created or already exists")
 
-	// Initialize with default version
-	_, err = tx.Exec("INSERT INTO version (version) VALUES (0)")
+	// Initialize with default version if not exists
+	_, err = tx.Exec("INSERT OR IGNORE INTO version (id, version) VALUES (1, 0)")
 	if err != nil {
 		return fmt.Errorf("failed to insert initial version: %v", err)
 	}
-	log.Printf("Initialized version table with default version 0")
+	log.Printf("Initialized version table with default version 0 if needed")
 
-	// Create vocabulary table
+	// Create vocabulary table - using 'word' as column name to match repository
 	_, err = tx.Exec(`
-		CREATE TABLE vocabulary (
-			term TEXT PRIMARY KEY
-		)
-	`)
+        CREATE TABLE IF NOT EXISTS vocabulary (
+            word TEXT PRIMARY KEY
+        )
+    `)
 	if err != nil {
 		return fmt.Errorf("failed to create vocabulary table: %v", err)
 	}
-	log.Printf("Vocabulary table created")
+	log.Printf("Vocabulary table created or already exists")
 
 	// Create subphrases table
 	_, err = tx.Exec(`
-		CREATE TABLE subphrases (
-			phrase TEXT PRIMARY KEY
-		)
-	`)
+        CREATE TABLE IF NOT EXISTS subphrases (
+            phrase TEXT PRIMARY KEY
+        )
+    `)
 	if err != nil {
 		return fmt.Errorf("failed to create subphrases table: %v", err)
 	}
-	log.Printf("Subphrases table created")
+	log.Printf("Subphrases table created or already exists")
 
 	// Create orthos table
 	_, err = tx.Exec(`
-		CREATE TABLE orthos (
-			id TEXT PRIMARY KEY,
-			grid TEXT NOT NULL,
-			shape TEXT NOT NULL,
-			position TEXT NOT NULL,
-			shell INTEGER NOT NULL DEFAULT 0
-		)
-	`)
+        CREATE TABLE IF NOT EXISTS orthos (
+            id TEXT PRIMARY KEY,
+            grid TEXT NOT NULL,
+            shape TEXT NOT NULL,
+            position TEXT NOT NULL,
+            shell INTEGER NOT NULL DEFAULT 0
+        )
+    `)
 	if err != nil {
 		return fmt.Errorf("failed to create orthos table: %v", err)
 	}
-	log.Printf("Orthos table created")
+	log.Printf("Orthos table created or already exists")
 
 	// Create remediations table
 	_, err = tx.Exec(`
-		CREATE TABLE remediations (
-			id TEXT PRIMARY KEY,
-			ortho_id TEXT NOT NULL,
-			pair_key TEXT NOT NULL,
-			FOREIGN KEY (ortho_id) REFERENCES orthos(id)
-		)
-	`)
+        CREATE TABLE IF NOT EXISTS remediations (
+            id TEXT PRIMARY KEY,
+            ortho_id TEXT NOT NULL,
+            pair_key TEXT NOT NULL,
+            FOREIGN KEY (ortho_id) REFERENCES orthos(id)
+        )
+    `)
 	if err != nil {
 		return fmt.Errorf("failed to create remediations table: %v", err)
 	}
-	log.Printf("Remediations table created")
+	log.Printf("Remediations table created or already exists")
 
 	// Create index on pair_key
 	_, err = tx.Exec(`
-		CREATE INDEX idx_remediations_pair_key ON remediations(pair_key)
-	`)
+        CREATE INDEX IF NOT EXISTS idx_remediations_pair_key ON remediations(pair_key)
+    `)
 	if err != nil {
 		return fmt.Errorf("failed to create index on remediations table: %v", err)
 	}
-	log.Printf("Remediations index created")
+	log.Printf("Remediations index created or already exists")
 
 	// Commit the transaction
 	err = tx.Commit()
@@ -780,10 +774,11 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 			return false
 		}
 
-		// Save vocabulary terms using the transaction
+		// Save vocabulary terms using the transaction - use 'word' column name to match schema
 		log.Printf("PROCESSING: Saving %d vocabulary terms", len(context.Vocabulary))
 		for _, term := range context.Vocabulary {
-			_, err := tx.Exec("INSERT OR IGNORE INTO vocabulary (term) VALUES (?)", term)
+			// Fix: Use 'word' instead of 'term' as the column name to match the schema
+			_, err := tx.Exec("INSERT OR IGNORE INTO vocabulary (word) VALUES (?)", term)
 			if err != nil {
 				log.Printf("ERROR: Error inserting vocabulary term %s: %v", term, err)
 				return false
@@ -801,7 +796,7 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 		}
 
 		// Verify vocabulary content after insertion
-		rows, err := tx.Query("SELECT term FROM vocabulary LIMIT 20")
+		rows, err := tx.Query("SELECT word FROM vocabulary LIMIT 20")
 		if err != nil {
 			log.Printf("WARNING: Could not verify vocabulary content: %v", err)
 		} else {
@@ -1152,7 +1147,7 @@ func logDatabaseState(tx *sql.Tx) {
 		log.Printf("DB STATE: Vocabulary count: %d", vocabCount)
 
 		// Log a sample of vocabulary
-		rows, err := tx.Query("SELECT term FROM vocabulary LIMIT 10")
+		rows, err := tx.Query("SELECT word FROM vocabulary LIMIT 10")
 		if err != nil {
 			log.Printf("WARNING: Failed to get sample vocabulary: %v", err)
 		} else {

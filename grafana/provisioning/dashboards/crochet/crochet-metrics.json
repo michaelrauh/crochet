@@ -56,222 +56,6 @@
             "spanNulls": false,
             "stacking": {
               "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
-      "id": 1,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "title": "Request Count",
-      "type": "timeseries",
-      "targets": [
-        {
-          "datasource": "Prometheus",
-          "editorMode": "code",
-          "expr": "sum(rate(crochet_crochet_ingestor_request_count_total{job=\"crochet-services\"}[1m])) by (http_path)",
-          "legendFormat": "Ingestor - {{http_path}}",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": "Prometheus",
-          "editorMode": "code",
-          "expr": "sum(rate(crochet_crochet_context_request_count_total[1m])) by (http_path)",
-          "hide": false,
-          "legendFormat": "Context - {{http_path}}",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": "Prometheus",
-          "editorMode": "code",
-          "expr": "sum(rate(crochet_crochet_remediations_request_count_total[1m])) by (http_path)",
-          "hide": false,
-          "legendFormat": "Remediations - {{http_path}}",
-          "range": true,
-          "refId": "C"
-        }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
-      "id": 2,
-      "options": {
-        "legend": {
-          "calcs": ["mean", "max"],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "title": "Request Duration",
-      "type": "timeseries",
-      "targets": [
-        {
-          "datasource": "Prometheus",
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(crochet_crochet_ingestor_request_duration_seconds_bucket[1m])) by (http_path, le))",
-          "legendFormat": "Ingestor 95% - {{http_path}}",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": "Prometheus",
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(crochet_crochet_context_request_duration_seconds_bucket[1m])) by (http_path, le))",
-          "hide": false,
-          "legendFormat": "Context 95% - {{http_path}}",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": "Prometheus",
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(crochet_crochet_remediations_request_duration_seconds_bucket[1m])) by (http_path, le))",
-          "hide": false,
-          "legendFormat": "Remediations 95% - {{http_path}}",
-          "range": true,
-          "refId": "C"
-        }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
               "mode": "normal"
             },
             "thresholdsStyle": {
@@ -304,7 +88,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 8
+        "y": 0
       },
       "id": 5,
       "options": {
@@ -319,18 +103,27 @@
           "sort": "none"
         }
       },
-      "title": "Workserver Queue Depth",
+      "title": "RabbitMQ Queue Depths",
       "type": "timeseries",
       "targets": [
         {
           "datasource": "Prometheus",
           "editorMode": "code",
-          "expr": "workserver_queue_depth_total",
-          "legendFormat": "Total Items",
+          "expr": "rabbitmq_queue_messages{queue=\"db-queue\"}",
+          "legendFormat": "DB Queue",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": "Prometheus",
+          "editorMode": "code",
+          "expr": "rabbitmq_queue_messages{queue=\"work-queue\"}",
+          "legendFormat": "Work Queue",
+          "range": true,
+          "refId": "B"
         }
-      ]
+      ],
+      "description": "Shows the current depth of RabbitMQ queues in the system"
     },
     {
       "datasource": {
@@ -357,7 +150,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 16
+        "y": 8
       },
       "id": 7,
       "options": {

@@ -79,6 +79,16 @@ func (m *MockRabbitMQService) PushSeed(ctx context.Context, seed types.Ortho) er
 	return args.Error(0)
 }
 
+func (m *MockRabbitMQService) PushOrtho(ctx context.Context, ortho types.Ortho) error {
+	args := m.Called(ctx, ortho)
+	return args.Error(0)
+}
+
+func (m *MockRabbitMQService) PushRemediation(ctx context.Context, remediation types.RemediationTuple) error {
+	args := m.Called(ctx, remediation)
+	return args.Error(0)
+}
+
 // setupGinRouter creates a test Gin router with the specified handlers
 func setupGinRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -351,7 +361,13 @@ func TestHandlePostResults(t *testing.T) {
 	}
 
 	mockOrthosCache.On("FilterNewOrthos", requestOrthos).Return(newOrthos)
-	mockStore.On("SaveOrthos", newOrthos).Return(nil)
+	// Remove the SaveOrthos call since we're no longer directly saving to the DB
+	// mockStore.On("SaveOrthos", newOrthos).Return(nil)
+
+	// Add expectations for the PushOrtho method calls
+	for _, ortho := range newOrthos {
+		mockRabbitMQ.On("PushOrtho", mock.Anything, ortho).Return(nil)
+	}
 
 	handler := NewRepositoryHandler(
 		mockStore,
@@ -385,6 +401,7 @@ func TestHandlePostResults(t *testing.T) {
 	mockStore.AssertExpectations(t)
 	mockWorkQueueClient.AssertExpectations(t)
 	mockOrthosCache.AssertExpectations(t)
+	mockRabbitMQ.AssertExpectations(t)
 }
 
 // TestHandleGetResults tests the GET /results endpoint

@@ -107,15 +107,16 @@ type RemediationsGetRequest struct {
 type RabbitMQService interface {
 	// PushContext pushes context data to a RabbitMQ queue
 	PushContext(ctx context.Context, contextInput ContextInput) error
-
 	// PushVersion pushes version info to a RabbitMQ queue
 	PushVersion(ctx context.Context, version VersionInfo) error
-
 	// PushPairs pushes a batch of text pairs to a RabbitMQ queue
 	PushPairs(ctx context.Context, pairs []Pair) error
-
 	// PushSeed pushes seed ortho data to a RabbitMQ queue
 	PushSeed(ctx context.Context, seed Ortho) error
+	// PushOrtho pushes an ortho to a RabbitMQ queue
+	PushOrtho(ctx context.Context, ortho Ortho) error
+	// PushRemediation pushes a remediation to a RabbitMQ queue
+	PushRemediation(ctx context.Context, remediation RemediationTuple) error
 }
 
 // RepositoryService defines the interface for interacting with the repository service

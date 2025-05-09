@@ -430,33 +430,40 @@ func GenerateCandidatesAndRemediations(workingVocabulary []string, required [][]
 	// Keep track of pairs that need to be remediated
 	var remediations []types.RemediationTuple
 
-	// Process required paths
-	for _, req := range required {
-		log.Printf("DEBUG: Processing required path: %v", req)
+	// Iterate through each vocabulary word (matches the Elixir implementation)
+	for _, word := range workingVocabulary {
+		log.Printf("DEBUG: Processing vocabulary word: %s", word)
 
-		// Skip any required paths that are too short
-		if len(req) < 2 {
-			log.Printf("DEBUG: Skipping required path that's too short: %v", req)
-			continue
+		// For each word, check if any required path is missing when combined with this word
+		missingRequiredFound := false
+		var missingRequired []string
+
+		for _, req := range required {
+			// Check if this pair exists in the map (creates the pair key as req + word)
+			pairKey := strings.Join(append(req, word), ",")
+			_, exists := pairsMap[pairKey]
+
+			log.Printf("DEBUG: Checking if pair '%s' exists: %t", pairKey, exists)
+
+			if !exists {
+				// Found a missing requirement for this word
+				missingRequiredFound = true
+				missingRequired = req
+				break // Stop at the first missing requirement (matches Elixir implementation)
+			}
 		}
 
-		// Check if this pair exists in the map
-		pairKey := strings.Join(req, ",")
-		_, exists := pairsMap[pairKey]
-
-		log.Printf("DEBUG: Checking if pair '%s' exists: %t", pairKey, exists)
-
-		if exists {
-			// This is a valid pair, add it to candidates
-			log.Printf("DEBUG: Found valid pair: %s", pairKey)
-			candidates = append(candidates, pairKey)
-		} else {
-			// This pair needs to be remediated
-			log.Printf("DEBUG: Pair not found, adding to remediations: %v", req)
+		if missingRequiredFound {
+			// This word fails at least one requirement, add it to remediations
+			log.Printf("DEBUG: Word fails requirement, adding to remediations: %s", word)
 			remTuple := types.RemediationTuple{
-				Pair: req,
+				Pair: append(missingRequired, word),
 			}
 			remediations = append(remediations, remTuple)
+		} else {
+			// This word passes all requirements, add it to candidates
+			log.Printf("DEBUG: Word passes all requirements, adding to candidates: %s", word)
+			candidates = append(candidates, word)
 		}
 	}
 
@@ -475,23 +482,13 @@ func GenerateNewOrthos(candidates []string, parent types.Ortho) []types.Ortho {
 	// Log candidates for debugging
 	log.Printf("DEBUG: Generating orthos from %d candidates", len(candidates))
 
-	for _, candidateKey := range candidates {
+	for _, word := range candidates {
 		// For debugging
-		log.Printf("DEBUG: Processing candidate: %s", candidateKey)
+		log.Printf("DEBUG: Processing candidate word: %s", word)
 
-		// Split the candidate key to get the individual words
-		words := strings.Split(candidateKey, ",")
-		if len(words) >= 2 {
-			// Use the first word as the additional word for the new ortho
-			additionalWord := words[0]
-			log.Printf("DEBUG: Adding word '%s' to parent ortho", additionalWord)
-
-			// Generate internal orthos using Add function
-			newOrthos := Add(parent, additionalWord, counter)
-			result = append(result, newOrthos...)
-		} else {
-			log.Printf("WARNING: Invalid candidate format: %s", candidateKey)
-		}
+		// Generate internal orthos using Add function directly with the word
+		newOrthos := Add(parent, word, counter)
+		result = append(result, newOrthos...)
 	}
 
 	return result

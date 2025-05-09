@@ -5,6 +5,9 @@ set -e
 echo "Using workspace mode with Go 1.24.2..."
 go work use
 
+# build to allow integration tests to run. In the future, flag these on separately
+docker compose up -d --build
+
 # Run unit tests for the repository service
 echo "Running unit tests for repository service..."
 cd repository
@@ -27,7 +30,6 @@ cd ..
 
 # Run end-to-end test for the repository service
 echo "Running end-to-end tests for repository service..."
-docker compose up -d --build
 cd test_e2e
 go run .
 cd ..

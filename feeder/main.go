@@ -201,7 +201,7 @@ func initializeDBSchema(db *sql.DB) error {
 	}
 	log.Printf("Orthos table created or already exists")
 
-	// Create remediations table
+	// Create remediations table - ensuring it supports arbitrary-length phrases through pair_key
 	_, err = tx.Exec(`
         CREATE TABLE IF NOT EXISTS remediations (
             id TEXT PRIMARY KEY,
@@ -215,7 +215,7 @@ func initializeDBSchema(db *sql.DB) error {
 	}
 	log.Printf("Remediations table created or already exists")
 
-	// Create index on pair_key
+	// Create index on pair_key for efficient lookups of arbitrary-length phrases
 	_, err = tx.Exec(`
         CREATE INDEX IF NOT EXISTS idx_remediations_pair_key ON remediations(pair_key)
     `)
@@ -576,10 +576,11 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 			log.Printf("ERROR: Error unmarshaling pair: %v", err)
 			return false
 		}
-		log.Printf("PROCESSING: Pair: %s - %s", pair.Left, pair.Right)
+		log.Printf("PROCESSING: Pair: %v", pair)
 
 		// Create a query to find remediations associated with this pair
-		pairKey := createPairKey([]string{pair.Left, pair.Right})
+		// Use createPairKey which already supports arbitrary-length phrases
+		pairKey := createPairKey(pair)
 		log.Printf("DEBUG: Using pair key: %s", pairKey)
 
 		// Query database for remediation records that match this pair
@@ -612,11 +613,11 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 
 		// If no orthos found, nothing to do but still consider successful
 		if len(orthoIDs) == 0 {
-			log.Printf("No orthos found for pair: %s - %s", pair.Left, pair.Right)
+			log.Printf("No orthos found for pair: %v", pair)
 			return true
 		}
 
-		log.Printf("Found %d orthos for pair: %s - %s", len(orthoIDs), pair.Left, pair.Right)
+		log.Printf("Found %d orthos for pair: %v", len(orthoIDs), pair)
 
 		// Now query for the actual ortho objects
 		placeholders := make([]string, len(orthoIDs))

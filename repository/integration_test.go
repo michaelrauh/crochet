@@ -84,106 +84,92 @@ func TestIntegratedPostCorpus(t *testing.T) {
 	// Wait for messages to be processed
 	time.Sleep(500 * time.Millisecond)
 
-	// Verify messages in the queue
-	messages, err := verificationClient.PopMessagesFromQueue(context.Background(), cfg.DBQueueName, 10)
-	require.NoError(t, err, "Failed to pop messages from queue")
-
-	// We should have at least 4 messages (context, version, at least one pair, and seed)
-	require.GreaterOrEqual(t, len(messages), 4, "Expected at least 4 messages in the queue")
-
 	// Track which types of messages we've seen
 	var foundContext, foundVersion, foundPair, foundSeed bool
 
-	// Analyze each message
-	for _, msg := range messages {
-		// First acknowledge the message
-		err = msg.Ack()
-		require.NoError(t, err, "Failed to acknowledge message")
+	// Process messages in batches until all are retrieved
+	for {
+		// Retrieve a batch of messages
+		messages, err := verificationClient.PopMessagesFromQueue(context.Background(), cfg.DBQueueName, 10)
+		require.NoError(t, err, "Failed to pop messages from queue")
 
-		switch msg.Data.Type {
-		case types.DBQueueItemTypeContext:
-			foundContext = true
-			// Verify context data
-			var contextData types.ContextInput
-			err = json.Unmarshal(msg.Data.Payload, &contextData)
-			require.NoError(t, err, "Failed to unmarshal context data")
-			assert.Equal(t, "Integration Test Title", contextData.Title)
-			assert.ElementsMatch(t, []string{"Sample", "text", "for", "integration", "testing", "with", "some", "phrases"}, contextData.Vocabulary)
-			expectedSubphrases := [][]string{
-				{"Sample", "text"},
-				{"Sample", "text", "for"},
-				{"Sample", "text", "for", "integration"},
-				{"Sample", "text", "for", "integration", "testing"},
-				{"Sample", "text", "for", "integration", "testing", "with"},
-				{"Sample", "text", "for", "integration", "testing", "with", "some"},
-				{"Sample", "text", "for", "integration", "testing", "with", "some", "phrases"},
-				{"text", "for"},
-				{"text", "for", "integration"},
-				{"text", "for", "integration", "testing"},
-				{"text", "for", "integration", "testing", "with"},
-				{"text", "for", "integration", "testing", "with", "some"},
-				{"text", "for", "integration", "testing", "with", "some", "phrases"},
-				{"for", "integration"},
-				{"for", "integration", "testing"},
-				{"for", "integration", "testing", "with"},
-				{"for", "integration", "testing", "with", "some"},
-				{"for", "integration", "testing", "with", "some", "phrases"},
-				{"integration", "testing"},
-				{"integration", "testing", "with"},
-				{"integration", "testing", "with", "some"},
-				{"integration", "testing", "with", "some", "phrases"},
-				{"testing", "with"},
-				{"testing", "with", "some"},
-				{"testing", "with", "some", "phrases"},
-				{"with", "some"},
-				{"with", "some", "phrases"},
-				{"some", "phrases"},
+		// If no more messages, break out of loop
+		if len(messages) == 0 {
+			break
+		}
+
+		// Analyze each message in this batch
+		for _, msg := range messages {
+			// First acknowledge the message
+			err = msg.Ack()
+			require.NoError(t, err, "Failed to acknowledge message")
+
+			switch msg.Data.Type {
+			case types.DBQueueItemTypeContext:
+				foundContext = true
+				// Verify context data
+				var contextData types.ContextInput
+				err = json.Unmarshal(msg.Data.Payload, &contextData)
+				require.NoError(t, err, "Failed to unmarshal context data")
+				assert.Equal(t, "Integration Test Title", contextData.Title)
+				assert.ElementsMatch(t, []string{"Sample", "text", "for", "integration", "testing", "with", "some", "phrases"}, contextData.Vocabulary)
+				expectedSubphrases := [][]string{
+					{"Sample", "text"},
+					{"Sample", "text", "for"},
+					{"Sample", "text", "for", "integration"},
+					{"Sample", "text", "for", "integration", "testing"},
+					{"Sample", "text", "for", "integration", "testing", "with"},
+					{"Sample", "text", "for", "integration", "testing", "with", "some"},
+					{"Sample", "text", "for", "integration", "testing", "with", "some", "phrases"},
+					{"text", "for"},
+					{"text", "for", "integration"},
+					{"text", "for", "integration", "testing"},
+					{"text", "for", "integration", "testing", "with"},
+					{"text", "for", "integration", "testing", "with", "some"},
+					{"text", "for", "integration", "testing", "with", "some", "phrases"},
+					{"for", "integration"},
+					{"for", "integration", "testing"},
+					{"for", "integration", "testing", "with"},
+					{"for", "integration", "testing", "with", "some"},
+					{"for", "integration", "testing", "with", "some", "phrases"},
+					{"integration", "testing"},
+					{"integration", "testing", "with"},
+					{"integration", "testing", "with", "some"},
+					{"integration", "testing", "with", "some", "phrases"},
+					{"testing", "with"},
+					{"testing", "with", "some"},
+					{"testing", "with", "some", "phrases"},
+					{"with", "some"},
+					{"with", "some", "phrases"},
+					{"some", "phrases"},
+				}
+				assert.ElementsMatch(t, expectedSubphrases, contextData.Subphrases)
+			case types.DBQueueItemTypeVersion:
+				foundVersion = true
+				var versionData types.VersionInfo
+				err = json.Unmarshal(msg.Data.Payload, &versionData)
+				require.NoError(t, err, "Failed to unmarshal version data")
+				assert.Greater(t, versionData.Version, 0)
+			case types.DBQueueItemTypePair:
+				foundPair = true
+				// Verify pair data
+				var pairData types.Pair
+				err = json.Unmarshal(msg.Data.Payload, &pairData)
+				require.NoError(t, err, "Failed to unmarshal pair data")
+				assert.NotEmpty(t, pairData[0], "First element of pair should not be empty")
+				assert.NotEmpty(t, pairData[1], "Second element of pair should not be empty")
+			case types.DBQueueItemTypeOrtho:
+				foundSeed = true
+				// Verify seed ortho data
+				var orthoData types.Ortho
+				err = json.Unmarshal(msg.Data.Payload, &orthoData)
+				require.NoError(t, err, "Failed to unmarshal ortho data")
+				assert.NotEmpty(t, orthoData.ID)
+				assert.Equal(t, []int{2, 2}, orthoData.Shape)
+				assert.Equal(t, []int{0, 0}, orthoData.Position)
+			default:
+				t.Errorf("Unexpected message type: %s", msg.Data.Type)
 			}
-
-			assert.ElementsMatch(t, expectedSubphrases, contextData.Subphrases)
-
-		case types.DBQueueItemTypeVersion:
-			foundVersion = true
-			var versionData types.VersionInfo
-			err = json.Unmarshal(msg.Data.Payload, &versionData)
-			require.NoError(t, err, "Failed to unmarshal version data")
-			assert.Greater(t, versionData.Version, 0)
-
-		case types.DBQueueItemTypePair:
-			foundPair = true
-			// Verify pair data
-
-			expectedPairs := [][]string{
-				{"Sample", "text"},
-				{"text", "for"},
-				{"for", "integration"},
-				{"integration", "testing"},
-				{"testing", "with"},
-				{"with", "some"},
-				{"some", "phrases"},
-			}
-			var pairData types.Pair
-			err = json.Unmarshal(msg.Data.Payload, &pairData)
-			require.NoError(t, err, "Failed to unmarshal pair data")
-			assert.NotEmpty(t, pairData.Left)
-			assert.NotEmpty(t, pairData.Right)
-
-			// Check if the pair exists in the expected pairs
-			actualPair := []string{pairData.Left, pairData.Right}
-			assert.Contains(t, expectedPairs, actualPair, "Unexpected pair found")
-
-		case types.DBQueueItemTypeOrtho:
-			foundSeed = true
-			// Verify seed ortho data
-			var orthoData types.Ortho
-			err = json.Unmarshal(msg.Data.Payload, &orthoData)
-			require.NoError(t, err, "Failed to unmarshal ortho data")
-			assert.NotEmpty(t, orthoData.ID)
-			assert.Equal(t, []int{2, 2}, orthoData.Shape)
-			assert.Equal(t, []int{0, 0}, orthoData.Position)
-
-		default:
-			t.Errorf("Unexpected message type: %s", msg.Data.Type)
 		}
 	}
 

@@ -105,14 +105,11 @@ func (h *RepositoryHandler) HandlePostCorpus(c *gin.Context) {
 
 	pairs := make([]types.Pair, 0)
 	for _, subphrase := range subphrases {
-		if len(subphrase) == 2 {
-			pairs = append(pairs, types.Pair{
-				Left:  subphrase[0],
-				Right: subphrase[1],
-			})
+		if len(subphrase) >= 2 {
+			pairs = append(pairs, types.Pair(subphrase))
 		}
 	}
-	log.Printf("[%s] Preparing to push %d pairs to DB queue: %v", requestID, len(pairs), pairs)
+	log.Printf("[%s] Preparing to push %d valid subphrases to DB queue", requestID, len(pairs))
 
 	// Start pushing pairs
 	log.Printf("[%s] Starting RabbitMQService.PushPairs call with %d pairs", requestID, len(pairs))

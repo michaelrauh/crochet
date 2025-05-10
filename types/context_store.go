@@ -135,7 +135,7 @@ func (ls *LibSQLContextStore) initSchema() error {
 	}
 	fmt.Println("Orthos table created or already exists")
 
-	// Create remediations table
+	// Create remediations table - ensuring it supports arbitrary-length phrases via pair_key
 	_, err = ls.db.Exec(`
 		CREATE TABLE IF NOT EXISTS remediations (
 			id TEXT PRIMARY KEY,
@@ -148,6 +148,15 @@ func (ls *LibSQLContextStore) initSchema() error {
 		return fmt.Errorf("error creating remediations table: %w", err)
 	}
 	fmt.Println("Remediations table created or already exists")
+
+	// Create index on pair_key for efficient lookups of arbitrary-length phrases
+	_, err = ls.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_remediations_pair_key ON remediations(pair_key)
+	`)
+	if err != nil {
+		return fmt.Errorf("error creating index on remediations pair_key: %w", err)
+	}
+	fmt.Println("Remediations index created or already exists")
 
 	// Create version table
 	_, err = ls.db.Exec(`
@@ -178,7 +187,6 @@ func (ls *LibSQLContextStore) initSchema() error {
 		if err != nil {
 			return fmt.Errorf("error verifying table %s: %w", table, err)
 		}
-
 		if count == 0 {
 			return fmt.Errorf("table %s was not created properly", table)
 		}

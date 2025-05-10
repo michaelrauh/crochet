@@ -283,10 +283,7 @@ func TestPairProcessingFlow(t *testing.T) {
 	remediationID := "remediation-456"
 
 	// Create a pair that will be used in the test
-	testPair := types.Pair{
-		Left:  "term1",
-		Right: "term2",
-	}
+	testPair := types.Pair{"term1", "term2"}
 
 	// Insert necessary test data into the database
 	// 1. Create a proper ortho object with all required fields
@@ -321,7 +318,7 @@ func TestPairProcessingFlow(t *testing.T) {
 
 	// 2. Add remediation entry that associates the pair with the ortho
 	// Create the pair_key in the same format as createPairKey() in main.go
-	pairKey := testPair.Left + ":" + testPair.Right
+	pairKey := createPairKey(testPair)
 
 	// Insert into remediations table (matches the table created in initializeDBSchema)
 	_, err = db.Exec(

@@ -430,7 +430,7 @@ func GenerateCandidatesAndRemediations(workingVocabulary []string, required [][]
 	// Keep track of pairs that need to be remediated
 	var remediations []types.RemediationTuple
 
-	// Iterate through each vocabulary word (matches the Elixir implementation)
+	// Iterate through each vocabulary word
 	for _, word := range workingVocabulary {
 		log.Printf("DEBUG: Processing vocabulary word: %s", word)
 
@@ -439,17 +439,22 @@ func GenerateCandidatesAndRemediations(workingVocabulary []string, required [][]
 		var missingRequired []string
 
 		for _, req := range required {
-			// Check if this pair exists in the map (creates the pair key as req + word)
-			pairKey := strings.Join(append(req, word), ",")
-			_, exists := pairsMap[pairKey]
+			// Create a pair from required path and current word
+			combinedPair := append([]string{}, req...)
+			combinedPair = append(combinedPair, word)
 
+			// Use consistent pair key creation method
+			pairKey := createPairKey(combinedPair)
+
+			// Check if this pair exists in the map
+			_, exists := pairsMap[pairKey]
 			log.Printf("DEBUG: Checking if pair '%s' exists: %t", pairKey, exists)
 
 			if !exists {
 				// Found a missing requirement for this word
 				missingRequiredFound = true
 				missingRequired = req
-				break // Stop at the first missing requirement (matches Elixir implementation)
+				break // Stop at the first missing requirement
 			}
 		}
 
@@ -470,6 +475,19 @@ func GenerateCandidatesAndRemediations(workingVocabulary []string, required [][]
 	// Log the final results
 	log.Printf("DEBUG: Generated %d candidates and %d remediations", len(candidates), len(remediations))
 	return candidates, remediations
+}
+
+// createPairKey creates a string key from a string slice for map lookups
+// This is the same implementation as in types/remediation_store.go and feeder/main.go
+func createPairKey(pair []string) string {
+	if len(pair) == 0 {
+		return ""
+	}
+	result := pair[0]
+	for i := 1; i < len(pair); i++ {
+		result += ":" + pair[i]
+	}
+	return result
 }
 
 // GenerateNewOrthos generates new orthos from the candidates.

@@ -110,11 +110,9 @@ type VersionInfo struct {
 	Version int `json:"version"`
 }
 
-// Pair represents a pair of text lines from a corpus
-type Pair struct {
-	Left  string `json:"left"`
-	Right string `json:"right"`
-}
+// Pair represents a phrase from a corpus
+// It's a slice of strings to allow for arbitrary-length phrases
+type Pair []string
 
 // DBQueueItem represents an item in the database processing queue
 // with a type field to determine how to handle it and a payload that contains the serialized data
@@ -218,7 +216,7 @@ func (item *DBQueueItem) GetVersion() (VersionInfo, error) {
 // GetPair extracts a Pair from the DBQueueItem
 func (item *DBQueueItem) GetPair() (Pair, error) {
 	if item.Type != DBQueueItemTypePair {
-		return Pair{}, fmt.Errorf("incorrect item type: expected %s, got %s", DBQueueItemTypePair, item.Type)
+		return nil, fmt.Errorf("incorrect item type: expected %s, got %s", DBQueueItemTypePair, item.Type)
 	}
 	var pair Pair
 	err := json.Unmarshal(item.Payload, &pair)

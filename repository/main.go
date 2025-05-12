@@ -5,5 +5,8 @@ import (
 )
 
 func main() {
-	fx.New().Run()
+	fx.New(
+		fx.Provide(NewRouter, NewHandler),
+		fx.Invoke(RegisterRoutes, StartServer),
+	).Run()
 }

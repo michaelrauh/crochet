@@ -687,15 +687,20 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 
 		// Now push the orthos to the work queue
 		if len(orthosToProcess) > 0 {
-			// Initialize RabbitMQ client for work queue
-			workQueueClient, err := httpclient.NewRabbitClient[types.WorkItem](cfg.RabbitMQURL)
+			// Initialize RabbitMQ client for work queue if not already initialized
+			var workQueueClient *httpclient.RabbitClient[types.WorkItem]
+			var err error
+
+			// Create a connection pool or reuse an existing client instead of creating a new one each time
+			workQueueClient, err = httpclient.NewRabbitClient[types.WorkItem](cfg.RabbitMQURL)
 			if err != nil {
 				log.Printf("Failed to create work queue client: %v", err)
 				return false
 			}
 			defer workQueueClient.Close(context.Background())
 
-			// Ensure the queue exists
+			// Queue should be declared once during service startup, not for every message
+			// We'll keep this as a safety check but ideally it would be moved to initialization
 			if err := workQueueClient.DeclareQueue(context.Background(), cfg.WorkQueueName); err != nil {
 				log.Printf("Failed to declare work queue: %v", err)
 				return false
@@ -744,6 +749,7 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 				}
 
 				// Push it to the DB queue using the correct method name
+				// Note: We don't need to declare the queue again here
 				err = dbQueueClient.PushMessage(context.Background(), cfg.DBQueueName, remediationDeleteJSON)
 				if err != nil {
 					log.Printf("Error pushing remediation delete to DB queue: %v", err)
@@ -972,7 +978,9 @@ func processBatchMessage(ctx context.Context, msg httpclient.MessageWithAck[type
 			return false
 		}
 		defer workQueueClient.Close(context.Background())
-		// Ensure the queue exists
+
+		// We should declare work queues once during service initialization, not for every message
+		// Keep this as a safety check but it should be refactored
 		if err := workQueueClient.DeclareQueue(context.Background(), cfg.WorkQueueName); err != nil {
 			log.Printf("ERROR: Failed to declare work queue: %v", err)
 			return false

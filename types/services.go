@@ -117,6 +117,8 @@ type RabbitMQService interface {
 	PushOrtho(ctx context.Context, ortho Ortho) error
 	// PushRemediation pushes a remediation to a RabbitMQ queue
 	PushRemediation(ctx context.Context, remediation RemediationTuple) error
+	// PushRemediationBatch pushes multiple remediations to a RabbitMQ queue in a single batch operation
+	PushRemediationBatch(ctx context.Context, remediations []RemediationTuple) error
 }
 
 // RepositoryService defines the interface for interacting with the repository service

@@ -89,6 +89,11 @@ func (m *MockRabbitMQService) PushRemediation(ctx context.Context, remediation t
 	return args.Error(0)
 }
 
+func (m *MockRabbitMQService) PushRemediationBatch(ctx context.Context, remediations []types.RemediationTuple) error {
+	args := m.Called(ctx, remediations)
+	return args.Error(0)
+}
+
 // setupGinRouter creates a test Gin router with the specified handlers
 func setupGinRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)

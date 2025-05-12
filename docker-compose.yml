@@ -48,12 +48,12 @@ services:
     build:
       context: .
       dockerfile: ./search/Dockerfile
-    # deploy:
-    #   replicas: 5
-    #   resources:
-    #     limits:
-    #       cpus: '0.5'
-    #       memory: 512M
+    deploy:
+      replicas: 5
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
     ports:
       - "8085"  # Only specify container port to allow Docker to allocate ports dynamically
     networks:
@@ -101,13 +101,14 @@ services:
       - FEEDER_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - FEEDER_DB_QUEUE_NAME=db-queue
       - FEEDER_WORK_QUEUE_NAME=work-queue
-      - FEEDER_BATCH_SIZE=10
+      - FEEDER_BATCH_SIZE=1000
       - FEEDER_PROCESSING_TIMEOUT=30s
       - FEEDER_CONTEXT_SERVICE_URL=http://repository:8080
       - FEEDER_JAEGER_ENDPOINT=jaeger:4317
       - FEEDER_METRICS_ENDPOINT=otel-collector:4317
       - FEEDER_PYROSCOPE_ENDPOINT=http://pyroscope:4040
       - FEEDER_CONTEXT_DB_ENDPOINT=file:/data/crochet.db?cache=shared
+      - FEEDER_PUSH_BATCH_DELAY=200ms
     volumes:
       - context-data:/data
     logging:
@@ -125,14 +126,24 @@ services:
       - app-network
     healthcheck:
       test: ["CMD", "rabbitmqctl", "status"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      interval: 10s
+      timeout: 15s
+      retries: 15
+      start_period: 60s
     environment:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
-      # Making RabbitMQ ephemeral by not using persistent storage
+      # Use configuration via mounted files
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-kernel inet_dist_listen_min 25672 -kernel inet_dist_listen_max 25672
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
     restart: always
+    volumes:
+      - ./rabbitmq-definitions.json:/etc/rabbitmq/definitions.json
+      - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
 
   rabbitmq-exporter:
     image: kbudde/rabbitmq-exporter:latest

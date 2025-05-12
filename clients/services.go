@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
+	"time"
 
 	"crochet/httpclient"
 	"crochet/types"
@@ -325,102 +328,84 @@ func (s *WorkServerServiceClient) Nack(ctx context.Context, id string) (types.Wo
 	return response, nil
 }
 
-func (s *RabbitMQServiceClient) PushContext(ctx context.Context, contextInput types.ContextInput) error {
-	log.Printf("[%s] Creating context queue item", ctx.Value("request_id"))
-	queueItem, err := types.CreateContextQueueItem(contextInput)
-	if err != nil {
-		log.Printf("[%s] Failed to create context queue item: %v", ctx.Value("request_id"), err)
-		return fmt.Errorf("failed to create context queue item: %w", err)
-	}
-
-	log.Printf("[%s] Marshaling context queue item", ctx.Value("request_id"))
-	itemJSON, err := json.Marshal(queueItem)
-	if err != nil {
-		log.Printf("[%s] Failed to marshal context queue item: %v", ctx.Value("request_id"), err)
-		return fmt.Errorf("failed to marshal context queue item: %w", err)
-	}
-
-	// Make sure the queue exists before pushing
-	log.Printf("[%s] Ensuring queue %s exists before pushing context", ctx.Value("request_id"), s.QueueName)
-	if err := s.DBQueueClient.DeclareQueue(ctx, s.QueueName); err != nil {
-		log.Printf("[%s] Failed to declare queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
-		return fmt.Errorf("failed to declare queue: %w", err)
-	}
-
-	log.Printf("[%s] Pushing context to queue %s", ctx.Value("request_id"), s.QueueName)
-	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
-		log.Printf("[%s] Failed to push context to queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
-		return fmt.Errorf("failed to push context to queue: %w", err)
-	}
-
-	log.Printf("[%s] Successfully pushed context to queue %s", ctx.Value("request_id"), s.QueueName)
-	return nil
-}
-
-func (s *RabbitMQServiceClient) PushVersion(ctx context.Context, version types.VersionInfo) error {
-	log.Printf("[%s] Creating version queue item with version %d", ctx.Value("request_id"), version.Version)
-	queueItem, err := types.CreateVersionQueueItem(version)
-	if err != nil {
-		log.Printf("[%s] Failed to create version queue item: %v", ctx.Value("request_id"), err)
-		return fmt.Errorf("failed to create version queue item: %w", err)
-	}
-
-	log.Printf("[%s] Marshaling version queue item", ctx.Value("request_id"))
-	itemJSON, err := json.Marshal(queueItem)
-	if err != nil {
-		log.Printf("[%s] Failed to marshal version queue item: %v", ctx.Value("request_id"), err)
-		return fmt.Errorf("failed to marshal version queue item: %w", err)
-	}
-
-	// Make sure the queue exists before pushing
-	log.Printf("[%s] Ensuring queue %s exists before pushing version", ctx.Value("request_id"), s.QueueName)
-	if err := s.DBQueueClient.DeclareQueue(ctx, s.QueueName); err != nil {
-		log.Printf("[%s] Failed to declare queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
-		return fmt.Errorf("failed to declare queue: %w", err)
-	}
-
-	log.Printf("[%s] Pushing version to queue %s", ctx.Value("request_id"), s.QueueName)
-	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
-		log.Printf("[%s] Failed to push version to queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
-		return fmt.Errorf("failed to push version to queue: %w", err)
-	}
-
-	log.Printf("[%s] Successfully pushed version to queue %s", ctx.Value("request_id"), s.QueueName)
-	return nil
-}
-
+// PushPairs pushes pairs to the database queue in smaller batches with delays
 func (s *RabbitMQServiceClient) PushPairs(ctx context.Context, pairs []types.Pair) error {
-	log.Printf("[%s] Creating %d pair queue items", ctx.Value("request_id"), len(pairs))
-	messages := make([][]byte, len(pairs))
+	count := len(pairs)
+	if count == 0 {
+		return nil
+	}
 
-	for i, pair := range pairs {
-		queueItem, err := types.CreatePairQueueItem(pair)
-		if err != nil {
-			log.Printf("[%s] Failed to create pair queue item at index %d: %v", ctx.Value("request_id"), i, err)
-			return fmt.Errorf("failed to create pair queue item at index %d: %w", i, err)
+	// Parse batch size from environment variable, default to 1000
+	batchSizeStr := os.Getenv("FEEDER_BATCH_SIZE")
+	batchSize, err := strconv.Atoi(batchSizeStr)
+	if err != nil || batchSize <= 0 {
+		batchSize = 1000
+		log.Printf("[%s] Using default batch size: %d", ctx.Value("request_id"), batchSize)
+	} else {
+		log.Printf("[%s] Using configured batch size from env: %d", ctx.Value("request_id"), batchSize)
+	}
+
+	// Parse batch delay from environment variable, default to 200ms
+	batchDelayStr := os.Getenv("FEEDER_PUSH_BATCH_DELAY")
+	batchDelay, err := time.ParseDuration(batchDelayStr)
+	if err != nil {
+		batchDelay = 200 * time.Millisecond
+		log.Printf("[%s] Using default batch delay: %s", ctx.Value("request_id"), batchDelay)
+	} else {
+		log.Printf("[%s] Using configured batch delay from env: %s", ctx.Value("request_id"), batchDelay)
+	}
+
+	log.Printf("[%s] Creating %d pair queue items in batches of %d with %s delay between batches",
+		ctx.Value("request_id"), count, batchSize, batchDelay)
+
+	// Process in batches
+	for i := 0; i < count; i += batchSize {
+		// Calculate end of current batch
+		end := i + batchSize
+		if end > count {
+			end = count
 		}
 
-		messages[i], err = json.Marshal(queueItem)
-		if err != nil {
-			log.Printf("[%s] Failed to marshal pair queue item at index %d: %v", ctx.Value("request_id"), i, err)
-			return fmt.Errorf("failed to marshal pair queue item at index %d: %w", i, err)
+		currentBatch := pairs[i:end]
+		log.Printf("[%s] Processing batch %d to %d of %d pairs",
+			ctx.Value("request_id"), i, end-1, count)
+
+		// Create messages for this batch
+		messages := make([][]byte, len(currentBatch))
+		for j, pair := range currentBatch {
+			queueItem, err := types.CreatePairQueueItem(pair)
+			if err != nil {
+				log.Printf("[%s] Failed to create pair queue item at index %d: %v",
+					ctx.Value("request_id"), i+j, err)
+				return fmt.Errorf("failed to create pair queue item at index %d: %w", i+j, err)
+			}
+
+			messages[j], err = json.Marshal(queueItem)
+			if err != nil {
+				log.Printf("[%s] Failed to marshal pair queue item at index %d: %v",
+					ctx.Value("request_id"), i+j, err)
+				return fmt.Errorf("failed to marshal pair queue item at index %d: %w", i+j, err)
+			}
+		}
+
+		// Push this batch
+		log.Printf("[%s] Pushing batch of %d pairs to queue %s",
+			ctx.Value("request_id"), len(currentBatch), s.QueueName)
+		if err := s.DBQueueClient.PushMessageBatch(ctx, s.QueueName, messages); err != nil {
+			log.Printf("[%s] Failed to push pair batch to queue %s: %v",
+				ctx.Value("request_id"), s.QueueName, err)
+			return fmt.Errorf("failed to push pair batch to queue: %w", err)
+		}
+
+		// Delay before the next batch, but only if this isn't the last batch
+		if end < count {
+			log.Printf("[%s] Sleeping for %s before next batch", ctx.Value("request_id"), batchDelay)
+			time.Sleep(batchDelay)
 		}
 	}
 
-	// Make sure the queue exists before pushing
-	log.Printf("[%s] Ensuring queue %s exists before pushing pairs", ctx.Value("request_id"), s.QueueName)
-	if err := s.DBQueueClient.DeclareQueue(ctx, s.QueueName); err != nil {
-		log.Printf("[%s] Failed to declare queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
-		return fmt.Errorf("failed to declare queue: %w", err)
-	}
-
-	log.Printf("[%s] Pushing %d pairs to queue %s", ctx.Value("request_id"), len(pairs), s.QueueName)
-	if err := s.DBQueueClient.PushMessageBatch(ctx, s.QueueName, messages); err != nil {
-		log.Printf("[%s] Failed to push pairs to queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
-		return fmt.Errorf("failed to push pairs to queue: %w", err)
-	}
-
-	log.Printf("[%s] Successfully pushed %d pairs to queue %s", ctx.Value("request_id"), len(pairs), s.QueueName)
+	log.Printf("[%s] Successfully pushed %d pairs to queue %s in batches",
+		ctx.Value("request_id"), count, s.QueueName)
 	return nil
 }
 
@@ -439,13 +424,7 @@ func (s *RabbitMQServiceClient) PushSeed(ctx context.Context, seed types.Ortho) 
 		return fmt.Errorf("failed to marshal ortho queue item: %w", err)
 	}
 
-	// Make sure the queue exists before pushing
-	log.Printf("[%s] Ensuring queue %s exists before pushing seed ortho", ctx.Value("request_id"), s.QueueName)
-	if err := s.DBQueueClient.DeclareQueue(ctx, s.QueueName); err != nil {
-		log.Printf("[%s] Failed to declare queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
-		return fmt.Errorf("failed to declare queue: %w", err)
-	}
-
+	// Queue already declared during initialization, no need to declare again
 	log.Printf("[%s] Pushing seed ortho to queue %s", ctx.Value("request_id"), s.QueueName)
 	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
 		log.Printf("[%s] Failed to push seed ortho to queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
@@ -472,13 +451,7 @@ func (s *RabbitMQServiceClient) PushOrtho(ctx context.Context, ortho types.Ortho
 		return fmt.Errorf("failed to marshal ortho queue item: %w", err)
 	}
 
-	// Make sure the queue exists before pushing
-	log.Printf("[%s] Ensuring queue %s exists before pushing ortho", ctx.Value("request_id"), s.QueueName)
-	if err := s.DBQueueClient.DeclareQueue(ctx, s.QueueName); err != nil {
-		log.Printf("[%s] Failed to declare queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
-		return fmt.Errorf("failed to declare queue: %w", err)
-	}
-
+	// Queue already declared during initialization, no need to declare again
 	log.Printf("[%s] Pushing ortho to queue %s", ctx.Value("request_id"), s.QueueName)
 	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
 		log.Printf("[%s] Failed to push ortho to queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
@@ -489,7 +462,114 @@ func (s *RabbitMQServiceClient) PushOrtho(ctx context.Context, ortho types.Ortho
 	return nil
 }
 
-// PushRemediation pushes a remediation to the DB queue
+// PushRemediationBatch pushes multiple remediations to the DB queue in smaller batches with delays
+func (s *RabbitMQServiceClient) PushRemediationBatch(ctx context.Context, remediations []types.RemediationTuple) error {
+	count := len(remediations)
+	if count == 0 {
+		return nil
+	}
+
+	// Parse batch size from environment variable, default to 1000
+	batchSizeStr := os.Getenv("FEEDER_BATCH_SIZE")
+	batchSize, err := strconv.Atoi(batchSizeStr)
+	if err != nil || batchSize <= 0 {
+		batchSize = 1000
+		log.Printf("[%s] Using default batch size: %d", ctx.Value("request_id"), batchSize)
+	} else {
+		log.Printf("[%s] Using configured batch size from env: %d", ctx.Value("request_id"), batchSize)
+	}
+
+	// Parse batch delay from environment variable, default to 200ms
+	batchDelayStr := os.Getenv("FEEDER_PUSH_BATCH_DELAY")
+	batchDelay, err := time.ParseDuration(batchDelayStr)
+	if err != nil {
+		batchDelay = 200 * time.Millisecond
+		log.Printf("[%s] Using default batch delay: %s", ctx.Value("request_id"), batchDelay)
+	} else {
+		log.Printf("[%s] Using configured batch delay from env: %s", ctx.Value("request_id"), batchDelay)
+	}
+
+	log.Printf("[%s] Creating %d remediation queue items in batches of %d with %s delay between batches",
+		ctx.Value("request_id"), count, batchSize, batchDelay)
+
+	// Process in batches
+	for i := 0; i < count; i += batchSize {
+		// Calculate end of current batch
+		end := i + batchSize
+		if end > count {
+			end = count
+		}
+
+		currentBatch := remediations[i:end]
+		log.Printf("[%s] Processing batch %d to %d of %d remediations",
+			ctx.Value("request_id"), i, end-1, count)
+
+		// Create messages for this batch
+		messages := make([][]byte, len(currentBatch))
+		for j, remediation := range currentBatch {
+			queueItem, err := types.CreateRemediationQueueItem(remediation)
+			if err != nil {
+				log.Printf("[%s] Failed to create remediation queue item at index %d: %v",
+					ctx.Value("request_id"), i+j, err)
+				return fmt.Errorf("failed to create remediation queue item at index %d: %w", i+j, err)
+			}
+
+			messages[j], err = json.Marshal(queueItem)
+			if err != nil {
+				log.Printf("[%s] Failed to marshal remediation queue item at index %d: %v",
+					ctx.Value("request_id"), i+j, err)
+				return fmt.Errorf("failed to marshal remediation queue item at index %d: %w", i+j, err)
+			}
+		}
+
+		// Push this batch
+		log.Printf("[%s] Pushing batch of %d remediations to queue %s",
+			ctx.Value("request_id"), len(currentBatch), s.QueueName)
+		if err := s.DBQueueClient.PushMessageBatch(ctx, s.QueueName, messages); err != nil {
+			log.Printf("[%s] Failed to push remediation batch to queue %s: %v",
+				ctx.Value("request_id"), s.QueueName, err)
+			return fmt.Errorf("failed to push remediation batch to queue: %w", err)
+		}
+
+		// Delay before the next batch, but only if this isn't the last batch
+		if end < count {
+			log.Printf("[%s] Sleeping for %s before next batch", ctx.Value("request_id"), batchDelay)
+			time.Sleep(batchDelay)
+		}
+	}
+
+	log.Printf("[%s] Successfully pushed %d remediations to queue %s in batches",
+		ctx.Value("request_id"), count, s.QueueName)
+	return nil
+}
+
+func (s *RabbitMQServiceClient) PushContext(ctx context.Context, contextInput types.ContextInput) error {
+	log.Printf("[%s] Creating context queue item", ctx.Value("request_id"))
+	queueItem, err := types.CreateContextQueueItem(contextInput)
+	if err != nil {
+		log.Printf("[%s] Failed to create context queue item: %v", ctx.Value("request_id"), err)
+		return fmt.Errorf("failed to create context queue item: %w", err)
+	}
+
+	log.Printf("[%s] Marshaling context queue item", ctx.Value("request_id"))
+	itemJSON, err := json.Marshal(queueItem)
+	if err != nil {
+		log.Printf("[%s] Failed to marshal context queue item: %v", ctx.Value("request_id"), err)
+		return fmt.Errorf("failed to marshal context queue item: %w", err)
+	}
+
+	// Queue already declared during initialization, no need to declare again
+	log.Printf("[%s] Pushing context to queue %s", ctx.Value("request_id"), s.QueueName)
+	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
+		log.Printf("[%s] Failed to push context to queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
+		return fmt.Errorf("failed to push context to queue: %w", err)
+	}
+
+	log.Printf("[%s] Successfully pushed context to queue %s", ctx.Value("request_id"), s.QueueName)
+	return nil
+}
+
+// PushRemediation pushes a single remediation to the DB queue
 func (s *RabbitMQServiceClient) PushRemediation(ctx context.Context, remediation types.RemediationTuple) error {
 	log.Printf("[%s] Creating remediation queue item", ctx.Value("request_id"))
 	queueItem, err := types.CreateRemediationQueueItem(remediation)
@@ -505,13 +585,7 @@ func (s *RabbitMQServiceClient) PushRemediation(ctx context.Context, remediation
 		return fmt.Errorf("failed to marshal remediation queue item: %w", err)
 	}
 
-	// Make sure the queue exists before pushing
-	log.Printf("[%s] Ensuring queue %s exists before pushing remediation", ctx.Value("request_id"), s.QueueName)
-	if err := s.DBQueueClient.DeclareQueue(ctx, s.QueueName); err != nil {
-		log.Printf("[%s] Failed to declare queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
-		return fmt.Errorf("failed to declare queue: %w", err)
-	}
-
+	// Queue already declared during initialization, no need to declare again
 	log.Printf("[%s] Pushing remediation to queue %s", ctx.Value("request_id"), s.QueueName)
 	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
 		log.Printf("[%s] Failed to push remediation to queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
@@ -519,6 +593,33 @@ func (s *RabbitMQServiceClient) PushRemediation(ctx context.Context, remediation
 	}
 
 	log.Printf("[%s] Successfully pushed remediation to queue %s", ctx.Value("request_id"), s.QueueName)
+	return nil
+}
+
+// PushVersion pushes a version update to the DB queue
+func (s *RabbitMQServiceClient) PushVersion(ctx context.Context, version types.VersionInfo) error {
+	log.Printf("[%s] Creating version queue item for version %d", ctx.Value("request_id"), version.Version)
+	queueItem, err := types.CreateVersionQueueItem(version)
+	if err != nil {
+		log.Printf("[%s] Failed to create version queue item: %v", ctx.Value("request_id"), err)
+		return fmt.Errorf("failed to create version queue item: %w", err)
+	}
+
+	log.Printf("[%s] Marshaling version queue item", ctx.Value("request_id"))
+	itemJSON, err := json.Marshal(queueItem)
+	if err != nil {
+		log.Printf("[%s] Failed to marshal version queue item: %v", ctx.Value("request_id"), err)
+		return fmt.Errorf("failed to marshal version queue item: %w", err)
+	}
+
+	// Queue already declared during initialization, no need to declare again
+	log.Printf("[%s] Pushing version to queue %s", ctx.Value("request_id"), s.QueueName)
+	if err := s.DBQueueClient.PushMessage(ctx, s.QueueName, itemJSON); err != nil {
+		log.Printf("[%s] Failed to push version to queue %s: %v", ctx.Value("request_id"), s.QueueName, err)
+		return fmt.Errorf("failed to push version to queue: %w", err)
+	}
+
+	log.Printf("[%s] Successfully pushed version %d to queue %s", ctx.Value("request_id"), version.Version, s.QueueName)
 	return nil
 }
 

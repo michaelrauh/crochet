@@ -63,32 +63,98 @@ func (c *RabbitWorkQueueClient) Close(ctx context.Context) error {
 	return err
 }
 
+// inspectQueueState logs detailed information about the queue's current state
+func (c *RabbitWorkQueueClient) inspectQueueState(ctx context.Context, queueName string) {
+	requestID := "unknown"
+	if ctx.Value("request_id") != nil {
+		requestID = ctx.Value("request_id").(string)
+	}
+
+	// Try to inspect the queue
+	queue, err := c.client.InspectQueue(ctx, queueName)
+	if err != nil {
+		log.Printf("DIAG[%s]: ⚠️ Error inspecting queue %s: %v", requestID, queueName, err)
+		return
+	}
+
+	log.Printf("DIAG[%s]: 📊 QUEUE INSPECTION: %s - Messages: %d, Consumers: %d, Ready: %d, Unacked: %d",
+		requestID, queueName, queue.Messages, queue.Consumers, queue.MessagesReady, queue.MessagesUnacknowledged)
+
+	// Push a test message to verify we can publish to the queue
+	testMsg := fmt.Sprintf("test-ping-%d", time.Now().UnixNano())
+	testWorkItem := types.WorkItem{
+		ID:        fmt.Sprintf("test-probe-%d", time.Now().UnixNano()),
+		Data:      map[string]interface{}{"probe": testMsg},
+		Timestamp: time.Now().UnixNano(),
+	}
+
+	testJSON, _ := json.Marshal(testWorkItem)
+	testQueueName := fmt.Sprintf("%s-probe", queueName)
+
+	// First declare the test queue
+	if err := c.client.DeclareQueue(ctx, testQueueName); err != nil {
+		log.Printf("DIAG[%s]: ⚠️ Failed to declare test queue %s: %v", requestID, testQueueName, err)
+		return
+	}
+
+	// Try to push to the test queue
+	if err := c.client.PushMessage(ctx, testQueueName, testJSON); err != nil {
+		log.Printf("DIAG[%s]: ⚠️ Test push to %s failed: %v - RabbitMQ may have connection issues",
+			requestID, testQueueName, err)
+		return
+	}
+
+	log.Printf("DIAG[%s]: ✅ Test push to %s succeeded - RabbitMQ connection is working", requestID, testQueueName)
+}
+
 // PopMessagesFromQueue implements the WorkQueueClient interface
 func (c *RabbitWorkQueueClient) PopMessagesFromQueue(ctx context.Context, queueName string, count int) ([]RabbitMessage, error) {
 	requestID := "unknown"
 	if ctx.Value("request_id") != nil {
 		requestID = ctx.Value("request_id").(string)
 	}
-	// Check RabbitMQ queue status directly before popping
-	log.Printf("DIAG[%s]: Checking work queue %s status before popping messages", requestID, queueName)
+
+	log.Printf("DIAG[%s]: 🔍 Starting detailed work queue inspection for %s", requestID, queueName)
+	c.inspectQueueState(ctx, queueName)
+
 	// Ensure the queue exists
 	log.Printf("DIAG[%s]: Declaring queue %s before popping messages", requestID, queueName)
 	if err := c.client.DeclareQueue(ctx, queueName); err != nil {
-		log.Printf("DIAG[%s]: Failed to declare queue %s: %v", requestID, queueName, err)
+		log.Printf("DIAG[%s]: ❌ Failed to declare queue %s: %v", requestID, queueName, err)
 		return nil, err
 	}
+
 	log.Printf("DIAG[%s]: Popping messages from work queue %s with count %d", requestID, queueName, count)
-	messages, err := c.client.PopMessagesFromQueue(ctx, queueName, count)
+
+	// Attempt to pop with a timeout context to prevent hanging
+	popCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	messages, err := c.client.PopMessagesFromQueue(popCtx, queueName, count)
 	if err != nil {
-		log.Printf("DIAG[%s]: Failed to pop messages from queue %s: %v", requestID, queueName, err)
+		log.Printf("DIAG[%s]: ❌ Failed to pop messages from queue %s: %v", requestID, queueName, err)
+
+		// If we timed out, add clearer logging
+		if popCtx.Err() == context.DeadlineExceeded {
+			log.Printf("DIAG[%s]: ⏱️ Timeout occurred while trying to pop from queue", requestID)
+		}
+
 		return nil, err
 	}
+
+	// Even if queue reports 0 messages, we'll still try to get messages as there appears to be
+	// a discrepancy between queue inspection and actual message availability
+	if len(messages) == 0 {
+		log.Printf("DIAG[%s]: ℹ️ No messages returned from queue %s (inspection may show messages but they may not be available for consumption)",
+			requestID, queueName)
+		// Run a second inspection after the failed pop for debugging purposes
+		c.inspectQueueState(ctx, queueName)
+		return []RabbitMessage{}, nil
+	}
+
 	// Convert httpclient.MessageWithAck to our RabbitMessage
 	result := make([]RabbitMessage, len(messages))
 	for i, msg := range messages {
-		// Fix for empty data issue - the message.Data coming from RabbitMQ is a WorkItem
-		// but we need to check if it has meaningful data or if the Data field is empty
-
 		// Log raw message data for debugging
 		if msgJSON, err := json.Marshal(msg.Data); err == nil {
 			log.Printf("DIAG[%s]: Raw message data: %s", requestID, string(msgJSON))
@@ -128,7 +194,7 @@ func (c *RabbitWorkQueueClient) PopMessagesFromQueue(ctx context.Context, queueN
 				requestID, i, msg.DeliveryTag, string(resultJSON))
 		}
 	}
-	log.Printf("DIAG[%s]: Successfully popped %d messages from work queue %s", requestID, len(result), queueName)
+	log.Printf("DIAG[%s]: ✅ Successfully popped %d messages from work queue %s", requestID, len(result), queueName)
 	return result, nil
 }
 

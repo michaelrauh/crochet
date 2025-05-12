@@ -519,11 +519,14 @@ func StartWorker(
 ) {
 	// Get a separate tracer for the worker
 	tracer := otel.Tracer("search-worker")
+
 	// Get the raw worker loop context
 	workerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
 	// Initialize the context on startup with a proper span
 	initCtx, initSpan := tracer.Start(workerCtx, "initialize_context")
+
 	// Try to initialize context data with retries
 	if err := UpdateContextDataWithRetry(initCtx, repositoryService, 15); err != nil {
 		log.Printf("Failed to initialize context data after maximum retries: %v", err)
@@ -535,6 +538,7 @@ func StartWorker(
 		log.Println("Successfully initialized context data")
 	}
 	initSpan.End()
+
 	// Worker loop
 	for {
 		// Check if context is done (service shutting down)
@@ -544,170 +548,180 @@ func StartWorker(
 			return
 		default:
 			// Continue with the worker loop
-		}
-		// If we don't have context data yet, keep trying to initialize
-		if searchState == nil || len(searchState.Vocabulary) == 0 {
-			if err := UpdateContextData(workerCtx, repositoryService); err != nil {
-				log.Printf("Still unable to initialize context data: %v", err)
-				time.Sleep(5 * time.Second) // Wait before retrying
+			// If we don't have context data yet, keep trying to initialize
+			if searchState == nil || len(searchState.Vocabulary) == 0 {
+				if err := UpdateContextData(workerCtx, repositoryService); err != nil {
+					log.Printf("Still unable to initialize context data: %v", err)
+					time.Sleep(5 * time.Second) // Wait before retrying
+					continue
+				}
+				log.Println("Successfully initialized context data in worker loop")
+			}
+
+			// Create a root span for this work cycle
+			rootCtx, rootSpan := tracer.Start(context.Background(), "worker_cycle")
+			rootSpan.SetAttributes(attribute.String("service.name", "search"))
+
+			// Add a waiting span to show we're actively polling
+			_, waitSpan := tracer.Start(rootCtx, "waiting_for_work")
+
+			// Call the repository to get a work item with a dedicated span
+			workCtx, workSpan := tracer.Start(rootCtx, "get_work_item")
+			workResponse, err := repositoryService.GetWork(workCtx)
+			if err != nil {
+				log.Printf("Error getting work item: %v", err)
+				workSpan.RecordError(err)
+				workSpan.End()
+				waitSpan.End()
+				rootSpan.End()
+				// Apply cooldown after error
+				time.Sleep(5 * time.Second) // Wait a bit before trying again
 				continue
 			}
-			log.Println("Successfully initialized context data in worker loop")
-		}
-		// Create a root span for this work cycle
-		rootCtx, rootSpan := tracer.Start(context.Background(), "worker_cycle")
-		rootSpan.SetAttributes(attribute.String("service.name", "search"))
-		// Add a waiting span to show we're actively polling
-		_, waitSpan := tracer.Start(rootCtx, "waiting_for_work")
-		// Call the repository to get a work item with a dedicated span
-		workCtx, workSpan := tracer.Start(rootCtx, "get_work_item")
-		workResponse, err := repositoryService.GetWork(workCtx)
-		if err != nil {
-			log.Printf("Error getting work item: %v", err)
-			workSpan.RecordError(err)
+
+			// End the work span now
 			workSpan.End()
+
+			// Check if the Work field is nil - WorkResponse is a value type, not a pointer
+			hasWork := workResponse.Work != nil
+			rootSpan.SetAttributes(attribute.Bool("has_work", hasWork))
+
+			// If no item is available, wait and try again
+			if !hasWork {
+				log.Println("No work items available, waiting...")
+				waitSpan.SetAttributes(attribute.Bool("found_work", false))
+				waitSpan.End()
+				rootSpan.End()
+				// Apply cooldown when no work is available
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			// We found work, end the waiting span
+			waitSpan.SetAttributes(attribute.Bool("found_work", true))
 			waitSpan.End()
-			rootSpan.End()
-			// Apply cooldown after error
-			time.Sleep(5 * time.Second) // Wait a bit before trying again
-			continue
-		}
-		// End the work span now
-		workSpan.End()
-		// Check if the Work field is nil - WorkResponse is a value type, not a pointer
-		hasWork := workResponse.Work != nil
-		rootSpan.SetAttributes(attribute.Bool("has_work", hasWork))
-		// If no item is available, wait and try again
-		if !hasWork {
-			log.Println("No work items available, waiting...")
-			waitSpan.SetAttributes(attribute.Bool("found_work", false))
-			waitSpan.End()
-			rootSpan.End()
-			// Apply cooldown when no work is available
-			time.Sleep(5 * time.Second)
-			continue
-		}
-		// We found work, end the waiting span
-		waitSpan.SetAttributes(attribute.Bool("found_work", true))
-		waitSpan.End()
 
-		// Get the receipt from the work response
-		receipt := workResponse.Receipt
-		log.Printf("Received work item with receipt: %s", receipt)
+			// Get the receipt from the work response
+			receipt := workResponse.Receipt
+			log.Printf("Received work item with receipt: %s", receipt)
 
-		// Get the work item from the response
-		workItem := workResponse.Work
+			// Get the work item from the response
+			workItem := workResponse.Work
 
-		// Enhanced logging: Log detailed work information including version
-		log.Printf("WORKER RECEIVED WORK: ID=%s, Timestamp=%d, Version=%d",
-			workItem.ID, workItem.Timestamp, workResponse.Version)
+			// Enhanced logging: Log detailed work information including version
+			log.Printf("WORKER RECEIVED WORK: ID=%s, Timestamp=%d, Version=%d",
+				workItem.ID, workItem.Timestamp, workResponse.Version)
 
-		// Log work data details if available
-		if workItem.Data != nil {
-			dataJSON, _ := json.Marshal(workItem.Data)
-			log.Printf("Work item data: %s", string(dataJSON))
-		}
+			// Log work data details if available
+			if workItem.Data != nil {
+				dataJSON, _ := json.Marshal(workItem.Data)
+				log.Printf("Work item data: %s", string(dataJSON))
+			}
 
-		// Convert the work item data to an Ortho
-		var ortho types.Ortho
+			// Convert the work item data to an Ortho
+			var ortho types.Ortho
 
-		// First convert the work item's Data field to bytes
-		dataBytes, err := json.Marshal(workItem.Data)
-		if err != nil {
-			log.Printf("Error marshaling work item data: %v", err)
-			rootSpan.RecordError(err)
-			rootSpan.End()
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		// Log the raw data before unmarshaling
-		log.Printf("RAW WORK DATA: %s", string(dataBytes))
-
-		// Enhanced validation before unmarshaling
-		if len(dataBytes) <= 2 { // Empty JSON object "{}" or less
-			log.Printf("WARNING: Work item data is empty or nearly empty: '%s'", string(dataBytes))
-			rootSpan.RecordError(fmt.Errorf("empty work item data"))
-			rootSpan.End()
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		// Check if this is a nested structure with a data field
-		var nestedStructure struct {
-			Data *types.Ortho `json:"data"`
-		}
-
-		if err := json.Unmarshal(dataBytes, &nestedStructure); err == nil && nestedStructure.Data != nil {
-			// Successfully detected and extracted the nested ortho
-			ortho = *nestedStructure.Data
-			log.Printf("Detected and extracted nested ortho structure with ID: %s", ortho.ID)
-		} else {
-			// Try direct unmarshaling as fallback (backward compatibility)
-			if err := json.Unmarshal(dataBytes, &ortho); err != nil {
-				log.Printf("Error unmarshaling work item data to Ortho: %v", err)
-				log.Printf("UNMARSHAL ERROR DETAILS: Data='%s', Error='%v'", string(dataBytes), err)
+			// First convert the work item's Data field to bytes
+			dataBytes, err := json.Marshal(workItem.Data)
+			if err != nil {
+				log.Printf("Error marshaling work item data: %v", err)
 				rootSpan.RecordError(err)
 				rootSpan.End()
 				time.Sleep(1 * time.Second)
 				continue
 			}
-		}
 
-		// Validate the unmarshaled ortho object
-		if ortho.ID == "" {
-			log.Printf("WARNING: Unmarshaled ortho has empty ID, generating a fallback ID")
-			ortho.ID = fmt.Sprintf("fallback_ortho_%d", time.Now().UnixNano())
-		}
+			// Log the raw data before unmarshaling
+			log.Printf("RAW WORK DATA: %s", string(dataBytes))
 
-		if ortho.Grid == nil {
-			log.Printf("WARNING: Unmarshaled ortho has nil Grid, initializing empty map")
-			ortho.Grid = make(map[string]string)
-		}
+			// Enhanced validation before unmarshaling
+			if len(dataBytes) <= 2 { // Empty JSON object "{}" or less
+				log.Printf("WARNING: Work item data is empty or nearly empty: '%s'", string(dataBytes))
+				rootSpan.RecordError(fmt.Errorf("empty work item data"))
+				rootSpan.End()
+				time.Sleep(1 * time.Second)
+				continue
+			}
 
-		log.Printf("WORKER PROCESSING ORTHO: ID=%s, Shape=%v, Position=%v, Shell=%d, GridSize=%d",
-			ortho.ID, ortho.Shape, ortho.Position, ortho.Shell, len(ortho.Grid))
-
-		// Process the work item inside a span
-		processCtx, processSpan := tracer.Start(rootCtx, "process_work_item")
-		processSpan.SetAttributes(
-			attribute.String("work_item.id", workItem.ID),
-			attribute.String("ortho.id", ortho.ID),
-			attribute.String("receipt", receipt),
-		)
-		// Track if we had an error during processing
-		hadProcessingError := false
-		// Use a panic handler to ensure trace completion
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					// Fix the non-constant format string error
-					errMsg := fmt.Sprintf("PANIC during processing: %v", r)
-					log.Println(errMsg)
-					// Fix the non-constant format string error in fmt.Errorf
-					processSpan.RecordError(fmt.Errorf("%s", errMsg))
-					// Mark that we had an error
-					hadProcessingError = true
+			// Check if this is a nested structure with a data field
+			var nestedStructure struct {
+				Data *types.Ortho `json:"data"`
+			}
+			if err := json.Unmarshal(dataBytes, &nestedStructure); err == nil && nestedStructure.Data != nil {
+				// Successfully detected and extracted the nested ortho
+				ortho = *nestedStructure.Data
+				log.Printf("Detected and extracted nested ortho structure with ID: %s", ortho.ID)
+			} else {
+				// Try direct unmarshaling as fallback (backward compatibility)
+				if err := json.Unmarshal(dataBytes, &ortho); err != nil {
+					log.Printf("Error unmarshaling work item data to Ortho: %v", err)
+					log.Printf("UNMARSHAL ERROR DETAILS: Data='%s', Error='%v'", string(dataBytes), err)
+					rootSpan.RecordError(err)
+					rootSpan.End()
+					time.Sleep(1 * time.Second)
+					continue
 				}
-				processSpan.End()
-			}()
-			// Process the work item
-			ProcessWorkItem(
-				processCtx,
-				repositoryService,
-				ortho,
-				receipt,
+			}
+
+			// Validate the unmarshaled ortho object
+			if ortho.ID == "" {
+				log.Printf("WARNING: Unmarshaled ortho has empty ID, generating a fallback ID")
+				ortho.ID = fmt.Sprintf("fallback_ortho_%d", time.Now().UnixNano())
+			}
+			if ortho.Grid == nil {
+				log.Printf("WARNING: Unmarshaled ortho has nil Grid, initializing empty map")
+				ortho.Grid = make(map[string]string)
+			}
+
+			log.Printf("WORKER PROCESSING ORTHO: ID=%s, Shape=%v, Position=%v, Shell=%d, GridSize=%d",
+				ortho.ID, ortho.Shape, ortho.Position, ortho.Shell, len(ortho.Grid))
+
+			// Process the work item inside a span
+			processCtx, processSpan := tracer.Start(rootCtx, "process_work_item")
+			processSpan.SetAttributes(
+				attribute.String("work_item.id", workItem.ID),
+				attribute.String("ortho.id", ortho.ID),
+				attribute.String("receipt", receipt),
 			)
-		}()
-		// Add a cooldown span and delay only if there was an error during processing
-		if hadProcessingError {
-			_, cooldownSpan := tracer.Start(rootCtx, "error_cooldown")
-			log.Println("Applying cooldown after processing error")
-			time.Sleep(500 * time.Millisecond) // Cooldown after error
-			cooldownSpan.End()
+
+			// Track if we had an error during processing
+			hadProcessingError := false
+
+			// Use a panic handler to ensure trace completion
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// Fix the non-constant format string error
+						errMsg := fmt.Sprintf("PANIC during processing: %v", r)
+						log.Println(errMsg)
+						// Fix the non-constant format string error in fmt.Errorf
+						processSpan.RecordError(fmt.Errorf("%s", errMsg))
+						// Mark that we had an error
+						hadProcessingError = true
+					}
+					processSpan.End()
+				}()
+
+				// Process the work item
+				ProcessWorkItem(
+					processCtx,
+					repositoryService,
+					ortho,
+					receipt,
+				)
+			}()
+
+			// Add a cooldown span and delay only if there was an error during processing
+			if hadProcessingError {
+				_, cooldownSpan := tracer.Start(rootCtx, "error_cooldown")
+				log.Println("Applying cooldown after processing error")
+				time.Sleep(500 * time.Millisecond) // Cooldown after error
+				cooldownSpan.End()
+			}
+
+			// End the root span for this cycle
+			rootSpan.End()
 		}
-		// End the root span for this cycle
-		rootSpan.End()
 	}
 }
 

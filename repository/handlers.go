@@ -186,19 +186,18 @@ func (h *RepositoryHandler) HandlePostResults(c *gin.Context) {
 		log.Printf("[%s] Successfully pushed %d orthos to DB queue", requestID, len(newOrthos))
 	}
 
-	// Push remediations to the DB queue
+	// Push remediations to the DB queue as a batch
 	if len(request.Remediations) > 0 {
 		log.Printf("[%s] Pushing %d remediations to DB queue", requestID, len(request.Remediations))
-		for _, remediation := range request.Remediations {
-			err = h.RabbitMQService.PushRemediation(ctx, remediation)
-			if err != nil {
-				telemetry.LogAndError(c, err, "repository", "Failed to push remediation to DB queue")
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"status":  "error",
-					"message": "Failed to push remediation to DB queue",
-				})
-				return
-			}
+		// Use the batch processing function instead of individual pushes
+		err = h.RabbitMQService.PushRemediationBatch(ctx, request.Remediations)
+		if err != nil {
+			telemetry.LogAndError(c, err, "repository", "Failed to push remediation batch to DB queue")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status":  "error",
+				"message": "Failed to push remediation batch to DB queue",
+			})
+			return
 		}
 		log.Printf("[%s] Successfully pushed %d remediations to DB queue", requestID, len(request.Remediations))
 	}
@@ -350,16 +349,44 @@ func (h *RepositoryHandler) HandleGetWork(c *gin.Context) {
 	log.Printf("[%s] Current version: %d", requestID, version)
 	log.Printf("[%s] Attempting to pop messages from work queue: %s", requestID, h.Config.WorkQueueName)
 
-	// Get work items from work queue
-	messages, err := h.WorkQueueClient.PopMessagesFromQueue(ctx, h.Config.WorkQueueName, 1)
-	if err != nil {
-		log.Printf("[%s] Error popping message from work queue: %v", requestID, err)
-		telemetry.LogAndError(c, err, "repository", "Error popping message from work queue")
-		return
+	// Make multiple attempts to get work since there might be a discrepancy between
+	// reported queue stats and actual message availability
+	const maxAttempts = 3
+	var messages []RabbitMessage
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// Get work items from work queue
+		messages, err = h.WorkQueueClient.PopMessagesFromQueue(ctx, h.Config.WorkQueueName, 1)
+		if err != nil {
+			log.Printf("[%s] Error popping message from work queue on attempt %d: %v",
+				requestID, attempt, err)
+
+			if attempt == maxAttempts {
+				telemetry.LogAndError(c, err, "repository", "Error popping message from work queue")
+				return
+			}
+
+			// Small delay before retry
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		if len(messages) > 0 {
+			log.Printf("[%s] Successfully popped message on attempt %d", requestID, attempt)
+			break
+		}
+
+		log.Printf("[%s] No work items available in queue on attempt %d, retrying...",
+			requestID, attempt)
+
+		// Don't sleep on the final attempt
+		if attempt < maxAttempts {
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 
 	if len(messages) == 0 {
-		log.Printf("[%s] No work items available in queue", requestID)
+		log.Printf("[%s] No work items available in queue after %d attempts", requestID, maxAttempts)
 		// Instead of returning nil for Work, return an empty WorkItem
 		emptyWorkItem := types.WorkItem{
 			ID:        fmt.Sprintf("empty-work-%d", time.Now().UnixNano()),

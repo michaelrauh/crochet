@@ -1,12 +1,17 @@
 services:
   repository:
     build:
-      context: ./repository
+      context: .
       dockerfile: ./Dockerfile
+      args:
+        SERVICE: repository
     ports:
       - "8080:8080"
+    environment:
+      PORT: 8080
     networks:
       - app-network
+
 networks:
   app-network:
     driver: bridge

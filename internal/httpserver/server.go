@@ -1,7 +1,8 @@
 package httpserver
 
 import (
-	"config"
+	"crochet/pkg/config"
+
 	"context"
 
 	"github.com/gin-gonic/gin"

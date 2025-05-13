@@ -4,10 +4,8 @@ WORKDIR /app
 
 COPY . ./
 
-ARG SERVICE
-WORKDIR /app/$SERVICE
-
 RUN go mod download
-RUN go build -o app
+
+RUN go build -o app ./cmd/repository
 
 CMD ["./app"]

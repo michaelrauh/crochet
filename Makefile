@@ -6,3 +6,7 @@ down:
 
 logs:
 	docker compose logs -f
+
+test: 
+	./request.sh
+	

@@ -1,0 +1,55 @@
+{
+    "id": null,
+    "uid": "crochet-app-overview",
+    "title": "Crochet App Overview",
+    "schemaVersion": 27,
+    "version": 1,
+    "refresh": "5s",
+    "time": {
+      "from": "now-15m",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "type": "stat",
+        "title": "Total /ping Requests",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "targets": [
+          { 
+            "expr": "ping_requests_total",
+            "instant": true,
+            "refId": "A",
+            "legendFormat": "Ping Requests"
+          }
+        ],
+        "options": {
+          "orientation": "auto",
+          "textMode": "value",
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null }
+              ]
+            },
+            "color": {
+              "mode": "thresholds"
+            },
+            "unit": "none",
+            "decimals": 0
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+      }
+    ]
+}

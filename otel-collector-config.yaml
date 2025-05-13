@@ -1,0 +1,17 @@
+receivers:
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: "repository"
+          scrape_interval: 10s
+          static_configs:
+            - targets: ["repository:8080"]
+          metrics_path: "/metrics"
+exporters:
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+service:
+  pipelines:
+    metrics:
+      receivers: [prometheus]
+      exporters: [prometheus]

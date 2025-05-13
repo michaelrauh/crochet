@@ -1,6 +1,10 @@
 package main
 
-import "github.com/gin-gonic/gin"
+import (
+	"crochet/pkg/telemetry"
+
+	"github.com/gin-gonic/gin"
+)
 
 type Handler struct{}
 
@@ -13,5 +17,7 @@ func RegisterRoutes(router *gin.Engine, h *Handler) {
 }
 
 func (h *Handler) Ping(c *gin.Context) {
+	telemetry.IncPingCounter()
+
 	c.JSON(200, gin.H{"message": "pong"})
 }

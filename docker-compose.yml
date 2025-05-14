@@ -7,8 +7,33 @@ services:
       - "8080:8080"
     environment:
       PORT: 8080
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: repo_user
+      DB_PASS: secret
+      DB_NAME: repo_db
     networks:
       - app-network
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: repo_user
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB:   repo_db
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U repo_user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
   jaeger:
     image: jaegertracing/all-in-one:1.53

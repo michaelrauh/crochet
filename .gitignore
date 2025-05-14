@@ -1,2 +1,4 @@
 /target
 princess.txt
+.env
+.env.example

@@ -5,13 +5,8 @@ services:
       dockerfile: ./Dockerfile
     ports:
       - "8080:8080"
-    environment:
-      PORT: 8080
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_USER: repo_user
-      DB_PASS: secret
-      DB_NAME: repo_db
+    env_file:
+      - .env
     networks:
       - app-network
     depends_on:
@@ -20,16 +15,18 @@ services:
 
   db:
     image: postgres:13
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: repo_user
-      POSTGRES_PASSWORD: secret
-      POSTGRES_DB:   repo_db
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME}
     ports:
       - "5432:5432"
     networks:
       - app-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U repo_user"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
       interval: 5s
       timeout: 5s
       retries: 5

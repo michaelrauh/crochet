@@ -21,7 +21,21 @@ type DB struct {
 }
 
 func Load() *Config {
+	// Setup viper to read from .env file
+	viper.SetConfigName(".env")
+	viper.SetConfigType("env")
+	viper.AddConfigPath(".")
+
+	// Also read from environment variables
 	viper.AutomaticEnv()
+
+	// Try to read from .env file, but continue if it doesn't exist
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			// Only log if it's not a "file not found" error
+			fmt.Printf("Warning: Error reading config file: %s\n", err)
+		}
+	}
 
 	// 1. Required vars
 	required := []string{

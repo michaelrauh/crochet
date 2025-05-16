@@ -1,4 +1,4 @@
-.PHONY: up down test test-e2e test-all sqlc-gen
+.PHONY: up down test test-e2e test-all sqlc-gen pprof
 
 up:
 	docker compose up -d --build
@@ -17,3 +17,6 @@ test-all: test test-e2e
 
 sqlc-gen:
 	sqlc generate
+
+pprof: 
+	go tool pprof -http=:8081 http://localhost:8080/debug/pprof/profile?seconds=30

@@ -10,6 +10,7 @@ type Config struct {
 	Port        string
 	DatabaseURL string
 	DB          DB
+	RabbitMQ    RabbitMQ
 }
 
 type DB struct {
@@ -18,6 +19,14 @@ type DB struct {
 	User string
 	Pass string
 	Name string
+}
+
+type RabbitMQ struct {
+	Host  string
+	Port  int
+	User  string
+	Pass  string
+	VHost string
 }
 
 func Load() *Config {
@@ -41,6 +50,7 @@ func Load() *Config {
 	required := []string{
 		"PORT",
 		"DB_HOST", "DB_PORT", "DB_USER", "DB_PASS", "DB_NAME",
+		"RABBITMQ_HOST", "RABBITMQ_PORT", "RABBITMQ_USER", "RABBITMQ_PASS", "RABBITMQ_VHOST",
 	}
 	for _, key := range required {
 		if !viper.IsSet(key) {
@@ -55,6 +65,12 @@ func Load() *Config {
 	pass := viper.GetString("DB_PASS")
 	name := viper.GetString("DB_NAME")
 	appPort := viper.GetString("PORT")
+
+	rmqHost := viper.GetString("RABBITMQ_HOST")
+	rmqPort := viper.GetInt("RABBITMQ_PORT")
+	rmqUser := viper.GetString("RABBITMQ_USER")
+	rmqPass := viper.GetString("RABBITMQ_PASS")
+	rmqVHost := viper.GetString("RABBITMQ_VHOST")
 
 	// 3. Build DSN
 	dsn := fmt.Sprintf(
@@ -71,6 +87,13 @@ func Load() *Config {
 			User: user,
 			Pass: pass,
 			Name: name,
+		},
+		RabbitMQ: RabbitMQ{
+			Host:  rmqHost,
+			Port:  rmqPort,
+			User:  rmqUser,
+			Pass:  rmqPass,
+			VHost: rmqVHost,
 		},
 	}
 }

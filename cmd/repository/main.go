@@ -5,6 +5,7 @@ import (
 	"crochet/internal/httpserver"
 	"crochet/pkg/config"
 	"crochet/pkg/db"
+	"crochet/pkg/rabbitmq"
 	"crochet/pkg/telemetry"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +16,7 @@ func main() {
 	fx.New(
 		telemetry.Module("repository"),
 		db.Module,
+		rabbitmq.Module,
 		fx.Provide(
 			config.Load,
 			newRouter,

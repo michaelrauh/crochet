@@ -12,6 +12,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      rabbitmq:
+        condition: service_started
 
   db:
     image: postgres:13
@@ -31,6 +33,26 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+      - "15692:15692" # Prometheus Exporter
+    networks:
+      - app-network
+    environment:
+      RABBITMQ_PROMETHEUS_EXPORTER: "true"
+    command:
+      - rabbitmq-server
+      - --prometheus.return_per_object_metrics=true
+      - --prometheus.listen_port=15692
+      - --prometheus.listen_addr=0.0.0.0
+      - --prometheus.include_queues=all
+      - --plugins rabbitmq_prometheus
+    labels:
+      - "prometheus-job=rabbitmq"
 
   jaeger:
     image: jaegertracing/all-in-one:1.53

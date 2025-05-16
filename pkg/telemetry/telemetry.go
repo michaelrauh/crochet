@@ -44,13 +44,24 @@ func RegisterGlobal(tp *trace.TracerProvider) {
 	otel.SetTracerProvider(tp)
 }
 
-var pingCounter = prometheus.NewCounter(prometheus.CounterOpts{
-	Name: "ping_requests_total",
-	Help: "Total number of /ping requests received.",
-})
+var (
+	pingCounter = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "ping_requests_total",
+		Help: "Total number of /ping requests received.",
+	})
+
+	RabbitMQQueueDepth = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "rabbitmq_queue_depth",
+			Help: "Current depth of RabbitMQ queues.",
+		},
+		[]string{"queue"},
+	)
+)
 
 func init() {
 	prometheus.MustRegister(pingCounter)
+	prometheus.MustRegister(RabbitMQQueueDepth)
 }
 
 func IncPingCounter() {

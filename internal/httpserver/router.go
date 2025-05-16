@@ -1,9 +1,9 @@
 package httpserver
 
 import (
+	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
-	"github.com/gin-contrib/pprof"
 )
 
 func NewRouter(serviceName string) *gin.Engine {

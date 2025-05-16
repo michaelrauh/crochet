@@ -29,8 +29,16 @@ func (h *Handler) Ping(c *gin.Context) {
 	h.queries.CreateItem(ctx, "exampleItem")
 	h.queries.GetItemByID(ctx, 1)
 
-	_ = h.rmq.Publish(ctx, "ping-queue", []byte("ping-message"))
-	_, _ = h.rmq.ConsumeOne(ctx, "ping-queue")
+	ch, err := h.rmq.CreateChannel()
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to create RabbitMQ channel"})
+		return
+	}
+	defer ch.Close()
+
+	_ = h.rmq.Publish(ctx, ch, "ping-queue", []byte("ping-message"))
+	delivery, _ := h.rmq.ConsumeOne(ctx, ch, "ping-queue")
+	_ = delivery.Ack(false)
 
 	c.JSON(200, gin.H{"message": "pong"})
 }

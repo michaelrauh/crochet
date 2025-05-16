@@ -5,14 +5,22 @@ import (
 	"crochet/pkg/config"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/rabbitmq/amqp091-go"
 )
 
+type ChannelInterface interface {
+	Close() error
+	Qos(prefetchCount, prefetchSize int, global bool) error
+	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp091.Table) (<-chan amqp091.Delivery, error)
+}
+
 type Queue interface {
-	Publish(ctx context.Context, queueName string, body []byte) error
-	ConsumeOne(ctx context.Context, queueName string) ([]byte, error)
-	GetQueueDepth(queueName string) (int, error)
+	CreateChannel() (ChannelInterface, error)
+	Publish(ctx context.Context, ch ChannelInterface, queueName string, body []byte) error
+	ConsumeOne(ctx context.Context, ch ChannelInterface, queueName string) (*amqp091.Delivery, error)
+	ConsumeBatch(ctx context.Context, ch ChannelInterface, queueName string, max int) ([]amqp091.Delivery, error)
 }
 
 type queue struct {
@@ -23,19 +31,26 @@ func NewQueue(conn *amqp091.Connection) Queue {
 	return &queue{conn: conn}
 }
 
-func (q *queue) Publish(ctx context.Context, queueName string, body []byte) error {
+func (q *queue) CreateChannel() (ChannelInterface, error) {
 	ch, err := q.conn.Channel()
 	if err != nil {
-		log.Printf("[RabbitMQ] Failed to open channel for publish: %v", err)
-		return err
+		log.Printf("[RabbitMQ] Failed to open channel: %v", err)
 	}
-	defer ch.Close()
-	_, err = ch.QueueDeclare(queueName, false, false, false, false, nil)
+	return ch, err
+}
+
+func (q *queue) Publish(ctx context.Context, ch ChannelInterface, queueName string, body []byte) error {
+	amqpCh, ok := ch.(*amqp091.Channel)
+	if !ok {
+		return fmt.Errorf("invalid channel type")
+	}
+	_, err := amqpCh.QueueDeclare(queueName, false, false, false, false, nil)
 	if err != nil {
 		log.Printf("[RabbitMQ] Failed to declare queue '%s': %v", queueName, err)
 		return err
 	}
-	err = ch.PublishWithContext(ctx, "", queueName, false, false,
+
+	err = amqpCh.PublishWithContext(ctx, "", queueName, false, false,
 		amqp091.Publishing{ContentType: "text/plain", Body: body},
 	)
 	if err != nil {
@@ -44,44 +59,61 @@ func (q *queue) Publish(ctx context.Context, queueName string, body []byte) erro
 	return err
 }
 
-func (q *queue) ConsumeOne(ctx context.Context, queueName string) ([]byte, error) {
-	ch, err := q.conn.Channel()
-	if err != nil {
-		log.Printf("[RabbitMQ] Failed to open channel for consume: %v", err)
-		return nil, err
-	}
-	defer ch.Close()
+func (q *queue) ConsumeOne(ctx context.Context, ch ChannelInterface, queueName string) (*amqp091.Delivery, error) {
 	msgs, err := ch.Consume(queueName, "", false, false, false, false, nil)
 	if err != nil {
 		log.Printf("[RabbitMQ] Failed to consume from queue '%s': %v", queueName, err)
 		return nil, err
 	}
+
 	select {
 	case msg := <-msgs:
-		err := msg.Ack(false)
-		if err != nil {
-			log.Printf("[RabbitMQ] Failed to ack message from queue '%s': %v", queueName, err)
-		}
-		return msg.Body, nil
+		return &msg, nil
 	case <-ctx.Done():
 		log.Printf("[RabbitMQ] Context cancelled while consuming from queue '%s'", queueName)
 		return nil, ctx.Err()
 	}
 }
 
-func (q *queue) GetQueueDepth(queueName string) (int, error) {
-	ch, err := q.conn.Channel()
-	if err != nil {
-		log.Printf("[RabbitMQ] Failed to open channel for queue depth: %v", err)
-		return 0, err
+func (q *queue) ConsumeBatch(ctx context.Context, ch ChannelInterface, queueName string, max int) ([]amqp091.Delivery, error) {
+	return q.consumeBatchWithQos(ctx, ch, queueName, max, func(ch ChannelInterface, max int) error {
+		return ch.Qos(max, 0, false)
+	})
+}
+
+func (q *queue) consumeBatchWithQos(
+	ctx context.Context,
+	ch ChannelInterface,
+	queueName string,
+	max int,
+	setQos func(ch ChannelInterface, max int) error,
+) ([]amqp091.Delivery, error) {
+	if err := setQos(ch, max); err != nil {
+		return nil, fmt.Errorf("failed to set prefetch: %w", err)
 	}
-	defer ch.Close()
-	queue, err := ch.QueueDeclarePassive(queueName, false, false, false, false, nil)
+	msgs, err := ch.Consume(queueName, "", false, false, false, false, nil)
 	if err != nil {
-		log.Printf("[RabbitMQ] Failed to declare passive queue '%s': %v", queueName, err)
-		return 0, err
+		log.Printf("[RabbitMQ] Failed to consume from queue '%s': %v", queueName, err)
+		return nil, err
 	}
-	return queue.Messages, nil
+	batch := make([]amqp091.Delivery, 0, max)
+	for i := 0; i < max; i++ {
+		select {
+		case msg, ok := <-msgs:
+			if !ok {
+				return batch, nil
+			}
+			batch = append(batch, msg)
+			if len(batch) == max {
+				return batch, nil
+			}
+		case <-ctx.Done():
+			return batch, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+			return batch, nil
+		}
+	}
+	return batch, nil
 }
 
 func NewConnection(cfg *config.Config) (*amqp091.Connection, error) {

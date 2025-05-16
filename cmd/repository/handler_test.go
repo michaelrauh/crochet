@@ -1,53 +1,106 @@
 package main
 
 import (
-	"crochet/mocks"
-	"crochet/pkg/db"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"testing"
+
+	"crochet/mocks"
+	"crochet/pkg/db"
 
 	"github.com/gin-gonic/gin"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/rabbitmq/amqp091-go"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
-var _ = Describe("Handler", func() {
-	var (
-		mockQueries *mocks.QueriesInterface
-		mockQueue   *mocks.Queue
-		handler     *Handler
-		recorder    *httptest.ResponseRecorder
-		ginContext  *gin.Context
-	)
+// MockChannel implements rabbitmq.ChannelInterface for testing
+type MockChannel struct {
+	mock.Mock
+}
 
-	BeforeEach(func() {
-		mockQueries = mocks.NewQueriesInterface(GinkgoT())
-		mockQueue = mocks.NewQueue(GinkgoT())
-		handler = NewHandler(mockQueries, mockQueue)
-		recorder = httptest.NewRecorder()
+func (m *MockChannel) Close() error {
+	args := m.Called()
+	return args.Error(0)
+}
 
-		req, _ := http.NewRequest("GET", "/ping", nil)
-		ginContext, _ = gin.CreateTestContext(recorder)
-		ginContext.Request = req
-	})
+// Add stubs to satisfy pkg/rabbitmq.ChannelInterface
+func (m *MockChannel) Qos(prefetchCount, prefetchSize int, global bool) error {
+	// stubbed no-op
+	return nil
+}
 
-	It("responds with pong and calls DB and RabbitMQ methods with correct args", func() {
-		emptyItem := db.Item{}
-		ctx := ginContext.Request.Context()
-		mockQueries.On("CreateItem", ctx, "exampleItem").Return(emptyItem, nil).Once()
-		mockQueries.On("GetItemByID", ctx, int32(1)).Return(emptyItem, nil).Once()
-		mockQueue.On("Publish", ctx, "ping-queue", []byte("ping-message")).Return(nil).Once()
-		mockQueue.On("ConsumeOne", ctx, "ping-queue").Return([]byte("test"), nil).Once()
+func (m *MockChannel) Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp091.Table) (<-chan amqp091.Delivery, error) {
+	// stubbed no-op
+	return make(chan amqp091.Delivery), nil
+}
 
-		handler.Ping(ginContext)
+// MockAcknowledger implements amqp091.Acknowledger for testing
+type MockAcknowledger struct {
+	mock.Mock
+}
 
-		Expect(recorder.Code).To(Equal(200))
-		var response map[string]interface{}
-		err := json.Unmarshal(recorder.Body.Bytes(), &response)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(response["message"]).To(Equal("pong"))
-		mockQueries.AssertExpectations(GinkgoT())
-		mockQueue.AssertExpectations(GinkgoT())
-	})
-})
+func (m *MockAcknowledger) Ack(tag uint64, multiple bool) error {
+	args := m.Called(tag, multiple)
+	return args.Error(0)
+}
+
+func (m *MockAcknowledger) Nack(tag uint64, multiple bool, requeue bool) error {
+	args := m.Called(tag, multiple, requeue)
+	return args.Error(0)
+}
+
+func (m *MockAcknowledger) Reject(tag uint64, requeue bool) error {
+	args := m.Called(tag, requeue)
+	return args.Error(0)
+}
+
+func TestHandler_Ping(t *testing.T) {
+	// Set up mocks for database queries and RabbitMQ queue
+	queries := mocks.NewQueriesInterface(t)
+	queue := NewMockQueue()
+	chMock := new(MockChannel)
+	ack := new(MockAcknowledger)
+
+	// Prepare a delivery with our acknowledger
+	delivery := &amqp091.Delivery{Acknowledger: ack}
+
+	// Expectations: database interactions
+	ctx := context.Background()
+	queries.On("CreateItem", ctx, "exampleItem").Return(db.Item{}, nil)
+	queries.On("GetItemByID", ctx, int32(1)).Return(db.Item{}, nil)
+
+	// Expectations: RabbitMQ interactions
+	queue.On("CreateChannel").Return(chMock, nil)
+	queue.On("Publish", ctx, chMock, "ping-queue", []byte("ping-message")).Return(nil)
+	queue.On("ConsumeOne", ctx, chMock, "ping-queue").Return(delivery, nil)
+
+	// Channel close and ack should be called once without error
+	chMock.On("Close").Return(nil)
+	ack.On("Ack", mock.Anything, false).Return(nil)
+
+	// Create handler and request context
+	h := NewHandler(queries, queue)
+	rec := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/ping", nil)
+	gctx, _ := gin.CreateTestContext(rec)
+	gctx.Request = req
+
+	// Call the handler
+	h.Ping(gctx)
+
+	// Verify HTTP response
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp map[string]interface{}
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	assert.Equal(t, "pong", resp["message"])
+
+	// Assert all mock expectations
+	queries.AssertExpectations(t)
+	queue.AssertExpectations(t)
+	chMock.AssertExpectations(t)
+	ack.AssertExpectations(t)
+}

@@ -5,6 +5,8 @@ package mocks
 import (
 	context "context"
 
+	amqp091 "github.com/rabbitmq/amqp091-go"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -13,29 +15,29 @@ type Queue struct {
 	mock.Mock
 }
 
-// ConsumeOne provides a mock function with given fields: ctx, queueName
-func (_m *Queue) ConsumeOne(ctx context.Context, queueName string) ([]byte, error) {
-	ret := _m.Called(ctx, queueName)
+// ConsumeOne provides a mock function with given fields: ctx, ch, queueName
+func (_m *Queue) ConsumeOne(ctx context.Context, ch *amqp091.Channel, queueName string) (*amqp091.Delivery, error) {
+	ret := _m.Called(ctx, ch, queueName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ConsumeOne")
 	}
 
-	var r0 []byte
+	var r0 *amqp091.Delivery
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) ([]byte, error)); ok {
-		return rf(ctx, queueName)
+	if rf, ok := ret.Get(0).(func(context.Context, *amqp091.Channel, string) (*amqp091.Delivery, error)); ok {
+		return rf(ctx, ch, queueName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) []byte); ok {
-		r0 = rf(ctx, queueName)
+	if rf, ok := ret.Get(0).(func(context.Context, *amqp091.Channel, string) *amqp091.Delivery); ok {
+		r0 = rf(ctx, ch, queueName)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]byte)
+			r0 = ret.Get(0).(*amqp091.Delivery)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = rf(ctx, queueName)
+	if rf, ok := ret.Get(1).(func(context.Context, *amqp091.Channel, string) error); ok {
+		r1 = rf(ctx, ch, queueName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -43,27 +45,29 @@ func (_m *Queue) ConsumeOne(ctx context.Context, queueName string) ([]byte, erro
 	return r0, r1
 }
 
-// GetQueueDepth provides a mock function with given fields: queueName
-func (_m *Queue) GetQueueDepth(queueName string) (int, error) {
-	ret := _m.Called(queueName)
+// CreateChannel provides a mock function with no fields
+func (_m *Queue) CreateChannel() (*amqp091.Channel, error) {
+	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetQueueDepth")
+		panic("no return value specified for CreateChannel")
 	}
 
-	var r0 int
+	var r0 *amqp091.Channel
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (int, error)); ok {
-		return rf(queueName)
+	if rf, ok := ret.Get(0).(func() (*amqp091.Channel, error)); ok {
+		return rf()
 	}
-	if rf, ok := ret.Get(0).(func(string) int); ok {
-		r0 = rf(queueName)
+	if rf, ok := ret.Get(0).(func() *amqp091.Channel); ok {
+		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(int)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*amqp091.Channel)
+		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(queueName)
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -71,17 +75,17 @@ func (_m *Queue) GetQueueDepth(queueName string) (int, error) {
 	return r0, r1
 }
 
-// Publish provides a mock function with given fields: ctx, queueName, body
-func (_m *Queue) Publish(ctx context.Context, queueName string, body []byte) error {
-	ret := _m.Called(ctx, queueName, body)
+// Publish provides a mock function with given fields: ctx, ch, queueName, body
+func (_m *Queue) Publish(ctx context.Context, ch *amqp091.Channel, queueName string, body []byte) error {
+	ret := _m.Called(ctx, ch, queueName, body)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Publish")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, []byte) error); ok {
-		r0 = rf(ctx, queueName, body)
+	if rf, ok := ret.Get(0).(func(context.Context, *amqp091.Channel, string, []byte) error); ok {
+		r0 = rf(ctx, ch, queueName, body)
 	} else {
 		r0 = ret.Error(0)
 	}

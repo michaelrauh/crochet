@@ -1,23 +1,24 @@
-//go:build !e2e
-// +build !e2e
-
 package main
 
 import (
 	"context"
-	"crochet/pkg/db"
-	"crochet/pkg/rabbitmq"
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"testing"
 	"time"
+
+	"crochet/pkg/db"
+	"crochet/pkg/rabbitmq"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	"github.com/rabbitmq/amqp091-go"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -34,12 +35,11 @@ var (
 	handler         *Handler
 )
 
-// Sets up a real PostgreSQL container and RabbitMQ container for integration testing
-var _ = BeforeSuite(func() {
+// TestMain sets up containers before tests and tears them down after.
+func TestMain(m *testing.M) {
 	ctx := context.Background()
-
-	// Create PostgreSQL container
-	container, err := postgres.RunContainer(ctx,
+	// Start PostgreSQL container
+	pgC, err := postgres.RunContainer(ctx,
 		testcontainers.WithImage("postgres:14-alpine"),
 		postgres.WithDatabase("test"),
 		postgres.WithUsername("test"),
@@ -48,31 +48,34 @@ var _ = BeforeSuite(func() {
 			wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(5*time.Second),
 		),
 	)
-	Expect(err).NotTo(HaveOccurred())
-	pgContainer = container
+	if err != nil {
+		log.Fatalf("failed to start postgres container: %v", err)
+	}
+	pgContainer = pgC
 
-	// Get connection details
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	Expect(err).NotTo(HaveOccurred())
-
-	// Connect to the database
+	if err != nil {
+		log.Fatalf("failed to get connection string: %v", err)
+	}
 	dbConn, err = sql.Open("postgres", connStr)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(dbConn.Ping()).To(Succeed())
+	if err != nil {
+		log.Fatalf("failed to open db connection: %v", err)
+	}
+	if err = dbConn.Ping(); err != nil {
+		log.Fatalf("failed to ping db: %v", err)
+	}
 
-	// Create the schema
-	_, err = dbConn.ExecContext(ctx, `
+	if _, err = dbConn.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS items (
 			id SERIAL PRIMARY KEY,
 			name TEXT NOT NULL
 		)
-	`)
-	Expect(err).NotTo(HaveOccurred())
-
-	// Initialize db.Queries
+	`); err != nil {
+		log.Fatalf("failed to create schema: %v", err)
+	}
 	dbQueries = db.New(dbConn)
 
-	// Start RabbitMQ container using generic testcontainers-go API
+	// Start RabbitMQ container
 	rabbitReq := testcontainers.ContainerRequest{
 		Image:        "rabbitmq:3-management",
 		ExposedPorts: []string{"5672/tcp", "15672/tcp"},
@@ -86,78 +89,72 @@ var _ = BeforeSuite(func() {
 		ContainerRequest: rabbitReq,
 		Started:          true,
 	})
-	Expect(err).NotTo(HaveOccurred())
+	if err != nil {
+		log.Fatalf("failed to start rabbitmq container: %v", err)
+	}
 	rabbitContainer = rabbitC
 
-	host, err := rabbitC.Host(ctx)
-	Expect(err).NotTo(HaveOccurred())
-	port, err := rabbitC.MappedPort(ctx, "5672")
-	Expect(err).NotTo(HaveOccurred())
+	host, err := rabbitContainer.Host(ctx)
+	if err != nil {
+		log.Fatalf("failed to get rabbit host: %v", err)
+	}
+	port, err := rabbitContainer.MappedPort(ctx, "5672")
+	if err != nil {
+		log.Fatalf("failed to get rabbit port: %v", err)
+	}
 	rmqUrl := fmt.Sprintf("amqp://guest:guest@%s:%s/", host, port.Port())
-
 	rmqConn, err = amqp091.Dial(rmqUrl)
-	Expect(err).NotTo(HaveOccurred())
+	if err != nil {
+		log.Fatalf("failed to dial rabbitmq: %v", err)
+	}
 	rmqQueue = rabbitmq.NewQueue(rmqConn)
 
-	// Real dependency injection with fx
+	// Initialize handler via fx
 	app := fx.New(
-		fx.Provide(func() QueriesInterface { return dbQueries }), // Provide a real db.Queries as QueriesInterface
-		fx.Provide(func() rabbitmq.Queue { return rmqQueue }),    // Provide a real RabbitMQ queue
+		fx.Provide(func() QueriesInterface { return dbQueries }),
+		fx.Provide(func() rabbitmq.Queue { return rmqQueue }),
 		fx.Provide(NewHandler),
 		fx.Populate(&handler),
 	)
-	Expect(app.Start(context.Background())).To(Succeed())
-})
-
-var _ = AfterSuite(func() {
-	ctx := context.Background()
-	if dbConn != nil {
-		Expect(dbConn.Close()).To(Succeed())
+	if err = app.Start(ctx); err != nil {
+		log.Fatalf("failed to start fx app: %v", err)
 	}
-	if pgContainer != nil {
-		Expect(pgContainer.Terminate(ctx)).To(Succeed())
-	}
-	if rmqConn != nil {
-		Expect(rmqConn.Close()).To(Succeed())
-	}
-	if rabbitContainer != nil {
-		Expect(rabbitContainer.Terminate(ctx)).To(Succeed())
-	}
-})
 
-var _ = Describe("Repository Handler Integration", func() {
-	var (
-		recorder *httptest.ResponseRecorder
-		ctx      *gin.Context
-	)
+	// Run tests
+	code := m.Run()
 
-	BeforeEach(func() {
-		recorder = httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/ping", nil)
-		ctx, _ = gin.CreateTestContext(recorder)
-		ctx.Request = req
-	})
+	// Teardown
+	dbConn.Close()
+	pgContainer.Terminate(ctx)
+	rmqConn.Close()
+	rabbitContainer.Terminate(ctx)
 
-	It("should store items in the database and interact with RabbitMQ when calling Ping", func() {
-		// Call the Ping method
-		handler.Ping(ctx)
+	os.Exit(code)
+}
 
-		// Verify HTTP response
-		Expect(recorder.Code).To(Equal(http.StatusOK))
-		Expect(recorder.Body.String()).To(MatchJSON(`{"message":"pong"}`))
+func TestPingIntegration(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/ping", nil)
+	gctx, _ := gin.CreateTestContext(rec)
+	gctx.Request = req
 
-		// Verify data was actually written to the database (integration test)
-		dbCtx := context.Background()
-		item, err := dbQueries.GetItemByID(dbCtx, 1)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(item.Name).To(Equal("exampleItem"))
+	// Call handler
+	handler.Ping(gctx)
 
-		// Verify RabbitMQ queue has been used (queue should be empty after consume)
-		ch, err := rmqConn.Channel()
-		Expect(err).NotTo(HaveOccurred())
-		q, err := ch.QueueDeclarePassive("ping-queue", false, false, false, false, nil)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(q.Messages).To(Equal(0))
-		_ = ch.Close()
-	})
-})
+	// Verify HTTP response
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"message":"pong"}`, rec.Body.String())
+
+	// Verify DB state
+	item, err := dbQueries.GetItemByID(context.Background(), 1)
+	require.NoError(t, err)
+	assert.Equal(t, "exampleItem", item.Name)
+
+	// Verify RabbitMQ queue is empty
+	ch, err := rmqConn.Channel()
+	require.NoError(t, err)
+	defer ch.Close()
+	q, err := ch.QueueDeclarePassive("ping-queue", false, false, false, false, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 0, q.Messages)
+}

@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel"
@@ -60,6 +61,7 @@ var (
 )
 
 func init() {
+	fmt.Println("In telemetry init")
 	prometheus.MustRegister(pingCounter)
 	prometheus.MustRegister(RabbitMQQueueDepth)
 }

@@ -1,13 +1,14 @@
+//go:build integration
+// +build integration
+
 package main
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -25,19 +26,9 @@ import (
 	"go.uber.org/fx"
 )
 
-var (
-	pgContainer     *postgres.PostgresContainer
-	dbConn          *sql.DB
-	dbQueries       *db.Queries
-	rabbitContainer testcontainers.Container
-	rmqConn         *amqp091.Connection
-	rmqQueue        rabbitmq.Queue
-	handler         *Handler
-)
-
-// TestMain sets up containers before tests and tears them down after.
-func TestMain(m *testing.M) {
+func TestPingIntegration(t *testing.T) {
 	ctx := context.Background()
+
 	// Start PostgreSQL container
 	pgC, err := postgres.RunContainer(ctx,
 		testcontainers.WithImage("postgres:14-alpine"),
@@ -45,35 +36,27 @@ func TestMain(m *testing.M) {
 		postgres.WithUsername("test"),
 		postgres.WithPassword("test"),
 		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(5*time.Second),
+			wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(10*time.Second),
 		),
 	)
-	if err != nil {
-		log.Fatalf("failed to start postgres container: %v", err)
-	}
-	pgContainer = pgC
+	require.NoError(t, err)
+	defer pgC.Terminate(ctx)
 
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		log.Fatalf("failed to get connection string: %v", err)
-	}
-	dbConn, err = sql.Open("postgres", connStr)
-	if err != nil {
-		log.Fatalf("failed to open db connection: %v", err)
-	}
-	if err = dbConn.Ping(); err != nil {
-		log.Fatalf("failed to ping db: %v", err)
-	}
+	connStr, err := pgC.ConnectionString(ctx, "sslmode=disable")
+	require.NoError(t, err)
+	dbConn, err := sql.Open("postgres", connStr)
+	require.NoError(t, err)
+	defer dbConn.Close()
+	require.NoError(t, dbConn.Ping())
 
-	if _, err = dbConn.ExecContext(ctx, `
+	_, err = dbConn.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS items (
 			id SERIAL PRIMARY KEY,
 			name TEXT NOT NULL
 		)
-	`); err != nil {
-		log.Fatalf("failed to create schema: %v", err)
-	}
-	dbQueries = db.New(dbConn)
+	`)
+	require.NoError(t, err)
+	dbQueries := db.New(dbConn)
 
 	// Start RabbitMQ container
 	rabbitReq := testcontainers.ContainerRequest{
@@ -89,50 +72,29 @@ func TestMain(m *testing.M) {
 		ContainerRequest: rabbitReq,
 		Started:          true,
 	})
-	if err != nil {
-		log.Fatalf("failed to start rabbitmq container: %v", err)
-	}
-	rabbitContainer = rabbitC
+	require.NoError(t, err)
+	defer rabbitC.Terminate(ctx)
 
-	host, err := rabbitContainer.Host(ctx)
-	if err != nil {
-		log.Fatalf("failed to get rabbit host: %v", err)
-	}
-	port, err := rabbitContainer.MappedPort(ctx, "5672")
-	if err != nil {
-		log.Fatalf("failed to get rabbit port: %v", err)
-	}
+	host, err := rabbitC.Host(ctx)
+	require.NoError(t, err)
+	port, err := rabbitC.MappedPort(ctx, "5672")
+	require.NoError(t, err)
 	rmqUrl := fmt.Sprintf("amqp://guest:guest@%s:%s/", host, port.Port())
-	rmqConn, err = amqp091.Dial(rmqUrl)
-	if err != nil {
-		log.Fatalf("failed to dial rabbitmq: %v", err)
-	}
-	rmqQueue = rabbitmq.NewQueue(rmqConn)
+	rmqConn, err := amqp091.Dial(rmqUrl)
+	require.NoError(t, err)
+	defer rmqConn.Close()
+	rmqQueue := rabbitmq.NewQueue(rmqConn)
 
-	// Initialize handler via fx
+	var handler *Handler
 	app := fx.New(
-		fx.Provide(func() QueriesInterface { return dbQueries }),
 		fx.Provide(func() rabbitmq.Queue { return rmqQueue }),
+		fx.Provide(func() QueriesInterface { return dbQueries }),
 		fx.Provide(NewHandler),
 		fx.Populate(&handler),
 	)
-	if err = app.Start(ctx); err != nil {
-		log.Fatalf("failed to start fx app: %v", err)
-	}
+	require.NoError(t, app.Start(ctx))
+	defer app.Stop(ctx)
 
-	// Run tests
-	code := m.Run()
-
-	// Teardown
-	dbConn.Close()
-	pgContainer.Terminate(ctx)
-	rmqConn.Close()
-	rabbitContainer.Terminate(ctx)
-
-	os.Exit(code)
-}
-
-func TestPingIntegration(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/ping", nil)
 	gctx, _ := gin.CreateTestContext(rec)

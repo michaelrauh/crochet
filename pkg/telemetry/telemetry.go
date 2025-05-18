@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -45,27 +44,6 @@ func RegisterGlobal(tp *trace.TracerProvider) {
 	otel.SetTracerProvider(tp)
 }
 
-var (
-	pingCounter = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "ping_requests_total",
-		Help: "Total number of /ping requests received.",
-	})
-
-	RabbitMQQueueDepth = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "rabbitmq_queue_depth",
-			Help: "Current depth of RabbitMQ queues.",
-		},
-		[]string{"queue"},
-	)
-)
-
 func init() {
 	fmt.Println("In telemetry init")
-	prometheus.MustRegister(pingCounter)
-	prometheus.MustRegister(RabbitMQQueueDepth)
-}
-
-func IncPingCounter() {
-	pingCounter.Inc()
 }

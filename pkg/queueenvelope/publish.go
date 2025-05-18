@@ -3,94 +3,52 @@ package queueenvelope
 import (
 	"context"
 	"crochet/pkg/ortho"
-	"crochet/pkg/rabbitmq"
+	"crochet/pkg/redisstream"
 	"log"
 )
 
-// PublishFunc matches the signature of rabbitmq.Queue.Publish.
-type PublishFunc func(ctx context.Context, ch rabbitmq.ChannelInterface, queueName string, body []byte) error
-
-func PublishVocabulary(ctx context.Context, ch rabbitmq.ChannelInterface, words []string, publish PublishFunc) error {
-	log.Printf("[QueueEnvelope] Starting to serialize vocabulary: %v", words)
-	body, err := SerializeVocabulary(words)
+func PublishVocabulary(ctx context.Context, queue redisstream.Queue, words []string) error {
+	jsonEnvelope, err := SerializeVocabulary(words)
 	if err != nil {
-		log.Printf("[QueueEnvelope] Error serializing vocabulary: %v", err)
 		return err
 	}
-	log.Printf("[QueueEnvelope] Serialized vocabulary, publishing to queue db: %s", string(body))
-	err = publish(ctx, ch, "db", body)
-	if err != nil {
-		log.Printf("[QueueEnvelope] Error publishing vocabulary: %v", err)
-	} else {
-		log.Printf("[QueueEnvelope] Successfully published vocabulary")
-	}
-	return err
+	values := map[string]interface{}{"envelope": string(jsonEnvelope)}
+	return queue.PublishBatch(ctx, "db", []map[string]interface{}{values})
 }
 
-func PublishSubphrases(ctx context.Context, ch rabbitmq.ChannelInterface, phrases [][]string, publish PublishFunc) error {
-	log.Printf("[QueueEnvelope] Starting to serialize subphrases: %v", phrases)
-	body, err := SerializeSubphrases(phrases)
+func PublishSubphrases(ctx context.Context, queue redisstream.Queue, phrases [][]string) error {
+	jsonEnvelope, err := SerializeSubphrases(phrases)
 	if err != nil {
-		log.Printf("[QueueEnvelope] Error serializing subphrases: %v", err)
 		return err
 	}
-	log.Printf("[QueueEnvelope] Serialized subphrases, publishing to queue db: %s", string(body))
-	err = publish(ctx, ch, "db", body)
-	if err != nil {
-		log.Printf("[QueueEnvelope] Error publishing subphrases: %v", err)
-	} else {
-		log.Printf("[QueueEnvelope] Successfully published subphrases")
-	}
-	return err
+	values := map[string]interface{}{"envelope": string(jsonEnvelope)}
+	return queue.PublishBatch(ctx, "db", []map[string]interface{}{values})
 }
 
-func PublishStartSigil(ctx context.Context, ch rabbitmq.ChannelInterface, sigil string, publish PublishFunc) error {
-	log.Printf("[QueueEnvelope] Starting to serialize start sigil: %s", sigil)
-	body, err := SerializeStartSigil(sigil)
+func PublishStartSigil(ctx context.Context, queue redisstream.Queue, sigil string) error {
+	jsonEnvelope, err := SerializeStartSigil(sigil)
 	if err != nil {
-		log.Printf("[QueueEnvelope] Error serializing start sigil: %v", err)
 		return err
 	}
-	log.Printf("[QueueEnvelope] Serialized start sigil, publishing to queue db: %s", string(body))
-	err = publish(ctx, ch, "db", body)
-	if err != nil {
-		log.Printf("[QueueEnvelope] Error publishing start sigil: %v", err)
-	} else {
-		log.Printf("[QueueEnvelope] Successfully published start sigil")
-	}
-	return err
+	values := map[string]interface{}{"envelope": string(jsonEnvelope)}
+	return queue.PublishBatch(ctx, "db", []map[string]interface{}{values})
 }
 
-func PublishEndSigil(ctx context.Context, ch rabbitmq.ChannelInterface, sigil string, publish PublishFunc) error {
-	log.Printf("[QueueEnvelope] Starting to serialize end sigil: %s", sigil)
-	body, err := SerializeEndSigil(sigil)
+func PublishEndSigil(ctx context.Context, queue redisstream.Queue, sigil string) error {
+	jsonEnvelope, err := SerializeEndSigil(sigil)
 	if err != nil {
-		log.Printf("[QueueEnvelope] Error serializing end sigil: %v", err)
 		return err
 	}
-	log.Printf("[QueueEnvelope] Serialized end sigil, publishing to queue db: %s", string(body))
-	err = publish(ctx, ch, "db", body)
-	if err != nil {
-		log.Printf("[QueueEnvelope] Error publishing end sigil: %v", err)
-	} else {
-		log.Printf("[QueueEnvelope] Successfully published end sigil")
-	}
-	return err
+	values := map[string]interface{}{"envelope": string(jsonEnvelope)}
+	return queue.PublishBatch(ctx, "db", []map[string]interface{}{values})
 }
 
-func PublishOrtho(ctx context.Context, ch rabbitmq.ChannelInterface, o *ortho.Ortho, publish PublishFunc) error {
-	log.Printf("[QueueEnvelope] Starting to serialize ortho")
-	body, err := SerializeOrtho(o)
+func PublishOrtho(ctx context.Context, queue redisstream.Queue, o *ortho.Ortho) error {
+	jsonEnvelope, err := SerializeOrtho(o)
 	if err != nil {
-		log.Printf("[QueueEnvelope] Error serializing ortho: %v", err)
+		log.Printf("Failed to serialize ortho envelope: %v", err)
 		return err
 	}
-	log.Printf("[QueueEnvelope] Serialized ortho, publishing to queue db: %s", string(body))
-	err = publish(ctx, ch, "db", body)
-	if err != nil {
-		log.Printf("[QueueEnvelope] Error publishing ortho: %v", err)
-	} else {
-		log.Printf("[QueueEnvelope] Successfully published ortho")
-	}
-	return err
+	values := map[string]interface{}{"envelope": string(jsonEnvelope)}
+	return queue.PublishBatch(ctx, "db", []map[string]interface{}{values})
 }

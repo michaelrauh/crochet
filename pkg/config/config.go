@@ -10,7 +10,7 @@ type Config struct {
 	Port        string
 	DatabaseURL string
 	DB          DB
-	RabbitMQ    RabbitMQ
+	Redis       Redis
 }
 
 type DB struct {
@@ -21,37 +21,34 @@ type DB struct {
 	Name string
 }
 
-type RabbitMQ struct {
-	Host  string
-	Port  int
-	User  string
-	Pass  string
-	VHost string
+type Redis struct {
+	Host string
+	Port int
+	Pass string
+	DB   int
 }
 
 func Load() *Config {
-	// Setup viper to read from .env file
-	viper.SetConfigName(".env")
-	viper.SetConfigType("env")
-	viper.AddConfigPath(".")
+	// 1. Set required environment variables
+	viper.SetDefault("PORT", "8080")
+	viper.SetDefault("DB_HOST", "localhost")
+	viper.SetDefault("DB_PORT", "5432")
+	viper.SetDefault("DB_USER", "postgres")
+	viper.SetDefault("DB_PASS", "postgres")
+	viper.SetDefault("DB_NAME", "postgres")
+	viper.SetDefault("REDIS_HOST", "localhost")
+	viper.SetDefault("REDIS_PORT", "6379")
+	viper.SetDefault("REDIS_PASS", "")
+	viper.SetDefault("REDIS_DB", "0")
 
-	// Also read from environment variables
 	viper.AutomaticEnv()
 
-	// Try to read from .env file, but continue if it doesn't exist
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			// Only log if it's not a "file not found" error
-			fmt.Printf("Warning: Error reading config file: %s\n", err)
-		}
+	// Check required environment variables
+	required := []string{
+		"DB_HOST", "DB_PORT", "DB_USER", "DB_PASS", "DB_NAME",
+		"REDIS_HOST", "REDIS_PORT",
 	}
 
-	// 1. Required vars
-	required := []string{
-		"PORT",
-		"DB_HOST", "DB_PORT", "DB_USER", "DB_PASS", "DB_NAME",
-		"RABBITMQ_HOST", "RABBITMQ_PORT", "RABBITMQ_USER", "RABBITMQ_PASS", "RABBITMQ_VHOST",
-	}
 	for _, key := range required {
 		if !viper.IsSet(key) {
 			panic(fmt.Sprintf("%s environment variable is required but not set", key))
@@ -66,11 +63,10 @@ func Load() *Config {
 	name := viper.GetString("DB_NAME")
 	appPort := viper.GetString("PORT")
 
-	rmqHost := viper.GetString("RABBITMQ_HOST")
-	rmqPort := viper.GetInt("RABBITMQ_PORT")
-	rmqUser := viper.GetString("RABBITMQ_USER")
-	rmqPass := viper.GetString("RABBITMQ_PASS")
-	rmqVHost := viper.GetString("RABBITMQ_VHOST")
+	redisHost := viper.GetString("REDIS_HOST")
+	redisPort := viper.GetInt("REDIS_PORT")
+	redisPass := viper.GetString("REDIS_PASS")
+	redisDB := viper.GetInt("REDIS_DB")
 
 	// 3. Build DSN
 	dsn := fmt.Sprintf(
@@ -88,12 +84,11 @@ func Load() *Config {
 			Pass: pass,
 			Name: name,
 		},
-		RabbitMQ: RabbitMQ{
-			Host:  rmqHost,
-			Port:  rmqPort,
-			User:  rmqUser,
-			Pass:  rmqPass,
-			VHost: rmqVHost,
+		Redis: Redis{
+			Host: redisHost,
+			Port: redisPort,
+			Pass: redisPass,
+			DB:   redisDB,
 		},
 	}
 }

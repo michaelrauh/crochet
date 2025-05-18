@@ -13,7 +13,7 @@ func SerializeVocabulary(words []string) ([]byte, error) {
 		return nil, err
 	}
 	env := Envelope{
-		Type: "Vocabulary",
+		Type: EnvelopeTypeVocabulary,
 		Data: data,
 	}
 	return json.Marshal(env)
@@ -27,7 +27,7 @@ func SerializeSubphrases(phrases [][]string) ([]byte, error) {
 		return nil, err
 	}
 	env := Envelope{
-		Type: "Subphrases",
+		Type: EnvelopeTypeSubphrases,
 		Data: data,
 	}
 	return json.Marshal(env)
@@ -41,7 +41,7 @@ func SerializeStartSigil(sigil string) ([]byte, error) {
 		return nil, err
 	}
 	env := Envelope{
-		Type: "StartSigil",
+		Type: EnvelopeTypeStartSigil,
 		Data: data,
 	}
 	return json.Marshal(env)
@@ -55,20 +55,20 @@ func SerializeEndSigil(sigil string) ([]byte, error) {
 		return nil, err
 	}
 	env := Envelope{
-		Type: "EndSigil",
+		Type: EnvelopeTypeEndSigil,
 		Data: data,
 	}
 	return json.Marshal(env)
 }
 
-// SerializeOrtho takes an *ortho.Ortho and returns a JSON envelope for ortho.
 func SerializeOrtho(o *ortho.Ortho) ([]byte, error) {
 	data, err := json.Marshal(o)
 	if err != nil {
 		return nil, err
 	}
+
 	env := Envelope{
-		Type: "Ortho",
+		Type: EnvelopeTypeOrtho,
 		Data: data,
 	}
 	return json.Marshal(env)

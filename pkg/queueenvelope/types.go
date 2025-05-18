@@ -2,6 +2,15 @@ package queueenvelope
 
 import "encoding/json"
 
+// Constants for envelope types
+const (
+	EnvelopeTypeVocabulary = "Vocabulary"
+	EnvelopeTypeSubphrases = "Subphrases"
+	EnvelopeTypeStartSigil = "StartSigil"
+	EnvelopeTypeEndSigil   = "EndSigil"
+	EnvelopeTypeOrtho      = "Ortho"
+)
+
 type Envelope struct {
 	Type string          `json:"Type"`
 	Data json.RawMessage `json:"Data"`

@@ -5,7 +5,7 @@ import (
 	"crochet/internal/httpserver"
 	"crochet/pkg/config"
 	"crochet/pkg/db"
-	"crochet/pkg/rabbitmq"
+	"crochet/pkg/redisstream"
 	"crochet/pkg/telemetry"
 
 	"github.com/gin-gonic/gin"
@@ -16,14 +16,14 @@ func main() {
 	fx.New(
 		telemetry.Module("repository"),
 		db.Module,
-		rabbitmq.Module,
+		redisstream.Module,
 		fx.Provide(
 			config.Load,
 			newRouter,
 			NewHandler,
 			fx.Annotate(
-				func(q *db.Queries) QueriesInterface { return q },
-				fx.As(new(QueriesInterface)),
+				func(q *db.Queries) db.QueriesInterface { return q },
+				fx.As(new(db.QueriesInterface)),
 			),
 		),
 		fx.Invoke(RegisterRoutes, startServer),

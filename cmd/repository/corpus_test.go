@@ -13,61 +13,76 @@ import (
 	"testing"
 	"time"
 
-	"crochet/pkg/rabbitmq"
+	"crochet/pkg/db"
+	"crochet/pkg/queueenvelope"
+	"crochet/pkg/redisstream"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rabbitmq/amqp091-go"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
+	rediscontainer "github.com/testcontainers/testcontainers-go/modules/redis"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"go.uber.org/fx"
 )
+
+// setupRedisContainer initializes a Redis container for testing
+func setupRedisContainer(t *testing.T, ctx context.Context) (*rediscontainer.RedisContainer, *redis.Client, redisstream.Queue) {
+	// Start Redis container
+	redisC, err := rediscontainer.RunContainer(ctx,
+		testcontainers.WithImage("redis:7.2"),
+		rediscontainer.WithSnapshotting(1, 1),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("Ready to accept connections").WithStartupTimeout(10*time.Second),
+		),
+	)
+	require.NoError(t, err)
+
+	// Get Redis connection details
+	redisHost, err := redisC.Host(ctx)
+	require.NoError(t, err)
+	redisPort, err := redisC.MappedPort(ctx, "6379")
+	require.NoError(t, err)
+
+	// Create Redis client
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: fmt.Sprintf("%s:%s", redisHost, redisPort.Port()),
+	})
+
+	// Enable AOF persistence
+	result := redisClient.ConfigSet(ctx, "appendonly", "yes")
+	require.NoError(t, result.Err())
+
+	// Create Redis Stream queue
+	redisQueue := redisstream.NewQueue(redisClient)
+
+	// Initialize stream and consumer group
+	err = redisClient.XGroupCreateMkStream(ctx, "db", "db", "0").Err()
+	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
+		require.NoError(t, err)
+	}
+
+	return redisC, redisClient, redisQueue
+}
 
 func TestCorpusIntegration(t *testing.T) {
 	fmt.Println("Starting test: TestCorpusIntegration")
 	ctx := context.Background()
 
-	rabbitReq := testcontainers.ContainerRequest{
-		Image:        "rabbitmq:3-management",
-		ExposedPorts: []string{"5672/tcp", "15672/tcp"},
-		WaitingFor:   wait.ForLog("Server startup complete"),
-		Env: map[string]string{
-			"RABBITMQ_DEFAULT_USER": "guest",
-			"RABBITMQ_DEFAULT_PASS": "guest",
-		},
-	}
-	fmt.Println("Starting RabbitMQ container")
-	rabbitC, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: rabbitReq,
-		Started:          true,
-	})
-	require.NoError(t, err)
+	// Setup Redis container, client and queue
+	redisC, redisClient, redisQueue := setupRedisContainer(t, ctx)
 	defer func() {
-		fmt.Println("Terminating RabbitMQ container")
-		rabbitC.Terminate(ctx)
+		fmt.Println("Terminating Redis container")
+		redisClient.Close()
+		redisC.Terminate(ctx)
 	}()
-
-	fmt.Println("Getting RabbitMQ host and port")
-	host, err := rabbitC.Host(ctx)
-	require.NoError(t, err)
-	port, err := rabbitC.MappedPort(ctx, "5672")
-	require.NoError(t, err)
-	rmqUrl := fmt.Sprintf("amqp://guest:guest@%s:%s/", host, port.Port())
-	fmt.Printf("Connecting to RabbitMQ at %s\n", rmqUrl)
-	rmqConn, err := amqp091.Dial(rmqUrl)
-	require.NoError(t, err)
-	defer func() {
-		fmt.Println("Closing RabbitMQ connection")
-		rmqConn.Close()
-	}()
-	rmqQueue := rabbitmq.NewQueue(rmqConn)
 
 	var handler *Handler
 	fmt.Println("Starting fx app")
 	app := fx.New(
-		fx.Provide(func() rabbitmq.Queue { return rmqQueue }),
-		fx.Provide(func() QueriesInterface { return nil }),
+		fx.Provide(func() redisstream.Queue { return redisQueue }),
+		fx.Provide(func() db.QueriesInterface { return nil }),
 		fx.Provide(NewHandler),
 		fx.Populate(&handler),
 	)
@@ -77,75 +92,90 @@ func TestCorpusIntegration(t *testing.T) {
 		app.Stop(ctx)
 	}()
 
-	fmt.Println("Opening RabbitMQ channel")
-	ch, err := rmqConn.Channel()
-	require.NoError(t, err)
-	defer func() {
-		fmt.Println("Closing RabbitMQ channel")
-		ch.Close()
-	}()
-
-	fmt.Println("Declaring db queue")
-	_, err = ch.QueueDeclare("db", false, false, false, false, nil)
-	require.NoError(t, err)
-
-	fmt.Println("Preparing HTTP request for handler")
-	rec := httptest.NewRecorder()
-	body := map[string]string{
-		"title":   "Example Title",
-		"content": "Example Content",
-	}
-	jsonBody, _ := json.Marshal(body)
-	req, _ := http.NewRequest(http.MethodPost, "/corpora", bytes.NewBuffer(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	gctx, _ := gin.CreateTestContext(rec)
-	gctx.Request = req
-
-	fmt.Println("Calling handler.Corpus")
-	handler.Corpus(gctx)
-	fmt.Println("handler.Corpus returned")
-
-	fmt.Printf("HTTP response code: %d, body: %s\n", rec.Code, rec.Body.String())
-	assert.Equal(t, http.StatusAccepted, rec.Code)
-	assert.JSONEq(t, `{"message":"Received corpus"}`, rec.Body.String())
-
-	// Helper function to consume one message with a fresh channel
-	consumeOneMessage := func(msgName string) []byte {
+	// Helper function to consume one message and parse its envelope
+	consumeOneMessage := func(msgName string) (map[string]interface{}, map[string]interface{}) {
 		fmt.Printf("Consuming %s message\n", msgName)
-
-		// Create a fresh channel for each consumption
-		freshCh, err := rmqConn.Channel()
-		require.NoError(t, err)
-		defer freshCh.Close()
-
 		// Create timeout context
 		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
-		// Use rmqQueue.ConsumeOne with the fresh channel
-		msg, err := rmqQueue.ConsumeOne(timeoutCtx, freshCh, "db")
+		// Use redisQueue.ConsumeBatch with count=1
+		msgs, err := redisQueue.ConsumeBatch(timeoutCtx, "db", "db", "test-consumer", 1)
+		require.NoError(t, err)
+		require.NotEmpty(t, msgs)
+		msg := &msgs[0]
+		fmt.Printf("Received %s message with ID: %s\n", msgName, msg.ID)
+
+		// Acknowledge the message
+		err = redisQueue.Ack(ctx, "db", "db", msg.ID)
 		require.NoError(t, err)
 
-		fmt.Printf("Received %s message: %s\n", msgName, string(msg.Body))
-		msg.Ack(false)
-		return msg.Body
+		// Parse the envelope
+		envelopeStr, ok := msg.Values["envelope"].(string)
+		require.True(t, ok, "Expected 'envelope' field in message values")
+		var envelope map[string]interface{}
+		err = json.Unmarshal([]byte(envelopeStr), &envelope)
+		require.NoError(t, err)
+
+		// Now parse the Data field which contains the actual payload
+		// Convert Data to JSON bytes regardless of its actual type
+		dataBytes, err := json.Marshal(envelope["Data"])
+		require.NoError(t, err)
+		var payload map[string]interface{}
+		err = json.Unmarshal(dataBytes, &payload)
+		require.NoError(t, err)
+
+		return envelope, payload
 	}
 
+	// Set up the Corpus endpoint test
+	corpus := Corpus{
+		Title:   "Test Corpus",
+		Content: "This is a test corpus with some words.",
+	}
+	jsonCorpus, err := json.Marshal(corpus)
+	require.NoError(t, err)
+
+	// Create HTTP request and context
+	req, err := http.NewRequest(http.MethodPost, "/corpora", bytes.NewBuffer(jsonCorpus))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	// Call the handler
+	handler.Corpus(c)
+
+	// Verify HTTP status code is 202 (Accepted)
+	assert.Equal(t, http.StatusAccepted, w.Code)
+
+	// Verify JSON response
+	var response map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Equal(t, "Corpus accepted", response["message"])
+	assert.Equal(t, "Test Corpus", response["title"])
+
 	// Consume all expected messages
-	startMsgBody := consumeOneMessage("START")
-	require.Contains(t, string(startMsgBody), "START")
+	envelope, payload := consumeOneMessage("START")
+	require.Equal(t, queueenvelope.EnvelopeTypeStartSigil, envelope["Type"])
+	require.Equal(t, "START", payload["Sigil"])
 
-	vocabMsgBody := consumeOneMessage("VOCABULARY")
-	require.NotEmpty(t, vocabMsgBody)
+	// Expect vocabulary message
+	envelope, payload = consumeOneMessage("vocabulary")
+	require.Equal(t, queueenvelope.EnvelopeTypeVocabulary, envelope["Type"])
+	require.NotNil(t, payload["Words"])
 
-	subphrasesMsgBody := consumeOneMessage("SUBPHRASES")
-	require.NotEmpty(t, subphrasesMsgBody)
+	// Expect subphrases message
+	envelope, payload = consumeOneMessage("subphrases")
+	require.Equal(t, queueenvelope.EnvelopeTypeSubphrases, envelope["Type"])
+	require.NotNil(t, payload["Phrases"])
 
-	endMsgBody := consumeOneMessage("END")
-	require.Contains(t, string(endMsgBody), "END")
+	// Expect END message
+	envelope, payload = consumeOneMessage("END")
+	require.Equal(t, queueenvelope.EnvelopeTypeEndSigil, envelope["Type"])
+	require.Equal(t, "END", payload["Sigil"])
 
-	orthoMsgBody := consumeOneMessage("ORTHO")
-	require.NotEmpty(t, orthoMsgBody)
-
-	fmt.Println("TestCorpusIntegration completed successfully")
+	fmt.Println("Test completed successfully")
 }

@@ -1,67 +1,74 @@
 {
-  "id": null,
-  "uid": "crochet-app-overview",
-  "title": "Crochet App Overview",
-  "schemaVersion": 27,
-  "version": 1,
-  "refresh": "5s",
-  "time": {
-    "from": "now-15m",
-    "to": "now"
+  "annotations": {
+    "list": []
   },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": 1,
+  "links": [],
+  "liveNow": false,
   "panels": [
     {
-      "id": 1,
-      "type": "stat",
-      "title": "Total /ping Requests",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "targets": [
-        { 
-          "expr": "ping_requests_total",
-          "instant": true
-        }
-      ],
-      "options": {
-        "textMode": "value",
-        "colorMode": "value",
-        "graphMode": "area"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null }
-            ]
-          }
-        }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
-    },
-    {
       "id": 2,
-      "type": "stat",
-      "title": "RabbitMQ Queue Depth",
+      "type": "timeseries",
+      "title": "Redis Stream Messages",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "targets": [
         {
-            "expr": "rabbitmq_queue_messages_ready{vhost=\"/\",queue=\"ping-queue\"}",
-          "instant": true
+          "expr": "redis_stream_messages{stream=\"db\"}",
+          "legendFormat": "DB Stream"
         }
       ],
       "options": {
-        "textMode": "value",
-        "colorMode": "value",
-        "graphMode": "area"
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -70,7 +77,23 @@
           }
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 }
     }
-  ]
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": [],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Crochet Dashboard",
+  "version": 1,
+  "weekStart": ""
 }

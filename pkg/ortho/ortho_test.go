@@ -14,17 +14,11 @@ func TestNewOrtho(t *testing.T) {
 	if len(o.Grid) != 0 {
 		t.Errorf("expected empty Grid, got %v", o.Grid)
 	}
-	if len(o.Shape) != 1 {
+	if len(o.Shape) != 0 {
 		t.Errorf("expected empty Shape, got %v", o.Shape)
 	}
-	if o.Shape[0] != 1 {
-		t.Errorf("expected Shape[0] 1, got %v", o.Shape[0])
-	}
-	if len(o.Position) != 1 {
+	if len(o.Position) != 0 {
 		t.Errorf("expected empty Position, got %v", o.Position)
-	}
-	if o.Position[0] != 0 {
-		t.Errorf("expected Position[0] 0, got %v", o.Position[0])
 	}
 	if o.Shell != 0 {
 		t.Errorf("expected Shell 0, got %v", o.Shell)

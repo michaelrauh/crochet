@@ -22,7 +22,7 @@ import (
 )
 
 // setupRedisContainer initializes a Redis container for testing
-func setupRedisContainer(t *testing.T, ctx context.Context) (*rediscontainer.RedisContainer, *redis.Client, redisstream.Queue) {
+func setupRedisContainer(t *testing.T, ctx context.Context) (*rediscontainer.RedisContainer, *redis.Client, *redisstream.Queue) {
 	// Start Redis container
 	redisC, err := rediscontainer.RunContainer(ctx,
 		testcontainers.WithImage("redis:7.2"),

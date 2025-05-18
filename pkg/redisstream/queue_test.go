@@ -147,7 +147,6 @@ func TestQueue_PublishMultipleAndConsumeBatchIntegration(t *testing.T) {
 	for _, msg := range msgs {
 		ids = append(ids, msg.ID)
 	}
-
 	err = q.Ack(ctx, streamName, groupName, ids...)
 	require.NoError(t, err)
 

@@ -28,7 +28,7 @@ import (
 )
 
 // setupRedisContainer initializes a Redis container for testing
-func setupRedisContainer(t *testing.T, ctx context.Context) (*rediscontainer.RedisContainer, *redis.Client, redisstream.Queue) {
+func setupRedisContainer(t *testing.T, ctx context.Context) (*rediscontainer.RedisContainer, *redis.Client, *redisstream.Queue) {
 	// Start Redis container
 	redisC, err := rediscontainer.RunContainer(ctx,
 		testcontainers.WithImage("redis:7.2"),
@@ -81,7 +81,7 @@ func TestCorpusIntegration(t *testing.T) {
 	var handler *Handler
 	fmt.Println("Starting fx app")
 	app := fx.New(
-		fx.Provide(func() redisstream.Queue { return redisQueue }),
+		fx.Provide(func() *redisstream.Queue { return redisQueue }),
 		fx.Provide(func() db.QueriesInterface { return nil }),
 		fx.Provide(NewHandler),
 		fx.Populate(&handler),
@@ -95,6 +95,7 @@ func TestCorpusIntegration(t *testing.T) {
 	// Helper function to consume one message and parse its envelope
 	consumeOneMessage := func(msgName string) (map[string]interface{}, map[string]interface{}) {
 		fmt.Printf("Consuming %s message\n", msgName)
+
 		// Create timeout context
 		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
@@ -113,6 +114,7 @@ func TestCorpusIntegration(t *testing.T) {
 		// Parse the envelope
 		envelopeStr, ok := msg.Values["envelope"].(string)
 		require.True(t, ok, "Expected 'envelope' field in message values")
+
 		var envelope map[string]interface{}
 		err = json.Unmarshal([]byte(envelopeStr), &envelope)
 		require.NoError(t, err)
@@ -121,6 +123,7 @@ func TestCorpusIntegration(t *testing.T) {
 		// Convert Data to JSON bytes regardless of its actual type
 		dataBytes, err := json.Marshal(envelope["Data"])
 		require.NoError(t, err)
+
 		var payload map[string]interface{}
 		err = json.Unmarshal(dataBytes, &payload)
 		require.NoError(t, err)

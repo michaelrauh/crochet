@@ -17,8 +17,8 @@ type Ortho struct {
 func NewOrtho() *Ortho {
 	return &Ortho{
 		Grid:     []interface{}{},
-		Shape:    []int{1},
-		Position: []int{0},
+		Shape:    []int{},
+		Position: []int{},
 		Shell:    0,
 		ID:       strconv.FormatInt(time.Now().UnixNano(), 10),
 	}

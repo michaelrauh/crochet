@@ -6,23 +6,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// todo remove
-type Queue interface {
-	PublishBatch(ctx context.Context, streamName string, valuesList []map[string]interface{}) error
-	ConsumeBatch(ctx context.Context, streamName, group, consumer string, count int) ([]redis.XMessage, error)
-	Ack(ctx context.Context, streamName, group string, ids ...string) error
-	Close() error
-}
-
-type queue struct {
+type Queue struct {
 	client *redis.Client
 }
 
-func NewQueue(client *redis.Client) Queue {
-	return &queue{client: client}
+func NewQueue(client *redis.Client) *Queue {
+	return &Queue{client: client}
 }
 
-func (q *queue) PublishBatch(ctx context.Context, streamName string, valuesList []map[string]interface{}) error {
+func (q *Queue) PublishBatch(ctx context.Context, streamName string, valuesList []map[string]interface{}) error {
 	for _, values := range valuesList {
 		args := &redis.XAddArgs{
 			Stream: streamName,
@@ -36,7 +28,7 @@ func (q *queue) PublishBatch(ctx context.Context, streamName string, valuesList 
 	return nil
 }
 
-func (q *queue) ConsumeBatch(ctx context.Context, streamName, group, consumer string, count int) ([]redis.XMessage, error) {
+func (q *Queue) ConsumeBatch(ctx context.Context, streamName, group, consumer string, count int) ([]redis.XMessage, error) {
 	// Use the client directly
 	res, err := q.client.XReadGroup(ctx, &redis.XReadGroupArgs{
 		Group:    group,
@@ -52,11 +44,11 @@ func (q *queue) ConsumeBatch(ctx context.Context, streamName, group, consumer st
 	return res[0].Messages, nil
 }
 
-func (q *queue) Ack(ctx context.Context, streamName, group string, ids ...string) error {
+func (q *Queue) Ack(ctx context.Context, streamName, group string, ids ...string) error {
 	return q.client.XAck(ctx, streamName, group, ids...).Err()
 }
 
-func (q *queue) Close() error {
+func (q *Queue) Close() error {
 	return q.client.Close()
 }
 

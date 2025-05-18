@@ -12,7 +12,7 @@ import (
 
 type Handler struct {
 	queries db.QueriesInterface
-	rdsq    redisstream.Queue
+	rdsq    *redisstream.Queue
 }
 
 type Corpus struct {
@@ -20,7 +20,7 @@ type Corpus struct {
 	Content string `json:"content"`
 }
 
-func NewHandler(queries db.QueriesInterface, rdsq redisstream.Queue) *Handler {
+func NewHandler(queries db.QueriesInterface, rdsq *redisstream.Queue) *Handler {
 	return &Handler{
 		queries: queries,
 		rdsq:    rdsq,

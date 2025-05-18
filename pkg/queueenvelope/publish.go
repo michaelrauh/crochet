@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-func PublishVocabulary(ctx context.Context, queue redisstream.Queue, words []string) error {
+func PublishVocabulary(ctx context.Context, queue *redisstream.Queue, words []string) error {
 	jsonEnvelope, err := SerializeVocabulary(words)
 	if err != nil {
 		return err
@@ -16,7 +16,7 @@ func PublishVocabulary(ctx context.Context, queue redisstream.Queue, words []str
 	return queue.PublishBatch(ctx, "db", []map[string]interface{}{values})
 }
 
-func PublishSubphrases(ctx context.Context, queue redisstream.Queue, phrases [][]string) error {
+func PublishSubphrases(ctx context.Context, queue *redisstream.Queue, phrases [][]string) error {
 	jsonEnvelope, err := SerializeSubphrases(phrases)
 	if err != nil {
 		return err
@@ -25,7 +25,7 @@ func PublishSubphrases(ctx context.Context, queue redisstream.Queue, phrases [][
 	return queue.PublishBatch(ctx, "db", []map[string]interface{}{values})
 }
 
-func PublishStartSigil(ctx context.Context, queue redisstream.Queue, sigil string) error {
+func PublishStartSigil(ctx context.Context, queue *redisstream.Queue, sigil string) error {
 	jsonEnvelope, err := SerializeStartSigil(sigil)
 	if err != nil {
 		return err
@@ -34,7 +34,7 @@ func PublishStartSigil(ctx context.Context, queue redisstream.Queue, sigil strin
 	return queue.PublishBatch(ctx, "db", []map[string]interface{}{values})
 }
 
-func PublishEndSigil(ctx context.Context, queue redisstream.Queue, sigil string) error {
+func PublishEndSigil(ctx context.Context, queue *redisstream.Queue, sigil string) error {
 	jsonEnvelope, err := SerializeEndSigil(sigil)
 	if err != nil {
 		return err
@@ -43,7 +43,7 @@ func PublishEndSigil(ctx context.Context, queue redisstream.Queue, sigil string)
 	return queue.PublishBatch(ctx, "db", []map[string]interface{}{values})
 }
 
-func PublishOrtho(ctx context.Context, queue redisstream.Queue, o *ortho.Ortho) error {
+func PublishOrtho(ctx context.Context, queue *redisstream.Queue, o *ortho.Ortho) error {
 	jsonEnvelope, err := SerializeOrtho(o)
 	if err != nil {
 		log.Printf("Failed to serialize ortho envelope: %v", err)
